@@ -157,6 +157,11 @@
       <div id="today-overview"></div>
     </div>
 
+    <div class="panel">
+      <span class="eyebrow">Hourly Breakdown</span>
+      <div id="hourly-breakdown" style="margin-top:10px;"></div>
+    </div>
+
     <div class="section-label">This Shift</div>
     <div id="summary-panel" class="panel"><div class="eyebrow">Loading summary&hellip;</div></div>
 
@@ -535,6 +540,7 @@ async function refreshEntryView() {
 
   await refreshTodayTotal();
   await refreshTodayOverview();
+  await refreshHourlyBreakdown();
 }
 
 async function refreshTodayTotal() {
@@ -623,6 +629,68 @@ function buildTimelineBar(scaleStart, scaleEnd, downtimeRows, latestTs, now) {
     html += '<div class="readout-empty" style="margin-top:4px;">No downtime logged yet today.</div>';
   }
   return html;
+}
+
+function interpolateCounterAt(events, targetMs) {
+  let before = null, after = null;
+  events.forEach(e => {
+    const ts = new Date(e.event_ts).getTime();
+    if (ts <= targetMs) before = e;
+    if (ts >= targetMs && after === null) after = e;
+  });
+  if (!before || !after) return null;
+  const bt = new Date(before.event_ts).getTime(), at = new Date(after.event_ts).getTime();
+  if (bt === at) return before.production_counter;
+  const frac = (targetMs - bt) / (at - bt);
+  return before.production_counter + frac * (after.production_counter - before.production_counter);
+}
+
+async function refreshHourlyBreakdown() {
+  const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
+  const lookbackStart = new Date(dayStart.getTime() - 24 * 60 * 60000);
+  const now = new Date();
+
+  const { data: events } = await sb.from("events").select("event_ts,production_counter")
+    .eq("line_id", state.currentLine).gte("event_ts", lookbackStart.toISOString())
+    .order("event_ts", { ascending: true });
+
+  const { data: downtime } = await sb.from("downtime_log").select("*").eq("line_id", state.currentLine)
+    .lt("start_ts", new Date(dayStart.getTime() + 24 * 60 * 60000).toISOString())
+    .or(`end_ts.is.null,end_ts.gte.${dayStart.toISOString()}`);
+
+  const rows = [];
+  for (let h = 0; h < 24; h++) {
+    const hs = new Date(dayStart.getTime() + h * 60 * 60000);
+    if (hs > now) break; // don't render hours that haven't started yet
+    const he = new Date(hs.getTime() + 60 * 60000);
+
+    const sc = interpolateCounterAt(events || [], hs.getTime());
+    const ec = interpolateCounterAt(events || [], Math.min(he.getTime(), now.getTime()));
+    const output = (sc !== null && ec !== null) ? Math.round(ec - sc) : null;
+
+    const downtimeParts = [];
+    (downtime || []).forEach(d => {
+      const dStart = new Date(d.start_ts).getTime();
+      const dEnd = d.end_ts ? new Date(d.end_ts).getTime() : now.getTime();
+      const overlapStart = Math.max(dStart, hs.getTime());
+      const overlapEnd = Math.min(dEnd, he.getTime());
+      if (overlapEnd > overlapStart) {
+        const mins = Math.round((overlapEnd - overlapStart) / 60000);
+        const reason = state.reasonCodes.find(r => r.reason_code_id === d.reason_code_id);
+        downtimeParts.push(`${reason?.label || d.reason_code_id || "Unknown"} (${mins} min)`);
+      }
+    });
+
+    rows.push({ hs, he, output, downtimeText: downtimeParts.join(", ") });
+  }
+
+  const el = document.getElementById("hourly-breakdown");
+  if (rows.length === 0) { el.innerHTML = '<div class="readout-empty">No data yet today.</div>'; return; }
+
+  el.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Hour</th><th>Production</th><th>Downtime</th></tr></thead><tbody>' +
+    rows.slice().reverse().map(r =>
+      `<tr><td>${fmtTime(r.hs)}\u2013${fmtTime(r.he)}</td><td>${r.output !== null ? r.output.toLocaleString() : "No data"}</td><td style="font-size:11px;">${r.downtimeText || "\u2014"}</td></tr>`
+    ).join("") + "</tbody></table></div>";
 }
 
 function renderSummary(el, shift, run, product, events, downtime) {
