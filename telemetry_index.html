@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<title>MDPL Telemetry</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root {
+    --bg: #1B1E21; --panel: #24282C; --panel-raised: #2A2F34; --border: #383E44;
+    --text: #E8EAED; --text-muted: #8B9198; --amber: #FFB020; --amber-dim: #6B4A16;
+    --green: #3ECF8E; --green-bg: rgba(62, 207, 142, 0.14); --red: #E5484D; --radius: 8px;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', -apple-system, sans-serif; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  .wrap { max-width: 480px; margin: 0 auto; padding: 16px 14px 40px; }
+  .wrap.wide { max-width: 1100px; }
+  .eyebrow { font-family: 'Oswald', sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted); }
+  h1 { font-family: 'Oswald', sans-serif; font-size: 24px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; margin: 2px 0 0; color: var(--text); }
+  h1 span { color: var(--amber); }
+  header.appbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--green); margin-right: 6px; box-shadow: 0 0 6px var(--green); }
+  select, input[type=number], input[type=date], input[type=text] { background: var(--panel); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius); padding: 9px 10px; font-family: 'JetBrains Mono', monospace; font-size: 14px; }
+  input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  button { font-family: 'Oswald', sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; padding: 10px 16px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--panel-raised); color: var(--text); cursor: pointer; }
+  button:active { transform: translateY(1px); }
+  button.primary { background: rgba(255,176,32,0.12); border-color: var(--amber-dim); color: var(--amber); }
+  button.big { width: 100%; padding: 16px; font-size: 15px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 16px; }
+  .hero-block { margin-bottom: 14px; }
+  .hero-label { font-family: 'Oswald', sans-serif; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 2px; }
+  .hero-number { font-family: 'JetBrains Mono', monospace; font-size: 40px; font-weight: 700; color: var(--amber); text-shadow: 0 0 16px var(--amber-dim); line-height: 1; }
+  .hero-unit { font-family: 'Inter', sans-serif; font-size: 13px; color: var(--text-muted); margin-left: 6px; }
+  .status-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .status-pill { display: flex; align-items: center; gap: 6px; font-family: 'Oswald', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; }
+  .time-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .time-cell-label { font-family: 'Oswald', sans-serif; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 3px; }
+  .time-cell-value { font-family: 'JetBrains Mono', monospace; font-size: 16px; color: var(--text); }
+  .perf-block { margin: 14px 0; padding-top: 12px; border-top: 1px solid var(--border); }
+  .perf-pct { font-family: 'JetBrains Mono', monospace; font-size: 28px; font-weight: 700; color: var(--amber); }
+  .progress-track { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; height: 8px; margin-top: 8px; overflow: hidden; }
+  .progress-fill { background: var(--amber); height: 100%; }
+  .readout-empty { font-size: 13px; color: var(--text-muted); }
+  .section-label { font-family: 'Oswald', sans-serif; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin: 18px 0 8px; }
+  .table-wrap { overflow-x: auto; overflow-y: auto; max-height: 320px; border: 1px solid var(--border); border-radius: var(--radius); }
+  table { border-collapse: collapse; width: 100%; font-family: 'JetBrains Mono', monospace; font-size: 12px; min-width: 400px; }
+  th { font-family: 'Oswald', sans-serif; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 500; color: var(--text-muted); background: var(--panel-raised); text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; position: sticky; top: 0; }
+  td { padding: 7px 10px; border-bottom: 1px solid var(--border); color: var(--text); white-space: nowrap; }
+  tr:last-child td { border-bottom: none; }
+  .new-row td { background: var(--green-bg) !important; }
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); align-items: center; justify-content: center; z-index: 100; }
+  .modal-overlay.open { display: flex; }
+  .modal-box { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; width: 88%; max-width: 380px; }
+  .modal-box label { font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 6px; }
+  .modal-box input { width: 100%; margin-top: 3px; margin-bottom: 10px; }
+  .tab-nav { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+  .tab-btn { flex: 1; background: transparent; border: none; border-radius: 0; padding: 10px 0; color: var(--text-muted); border-bottom: 2px solid transparent; }
+  .tab-btn.active { color: var(--amber); border-bottom-color: var(--amber); }
+  .pin-dot { width: 14px; height: 14px; border-radius: 9999px; border: 2px solid var(--text-muted); }
+  .pin-dot.filled { background: var(--amber); border-color: var(--amber); }
+  .toast { animation: slideUp .25s ease-out, fadeOut .3s ease-in 2.2s forwards; }
+  @keyframes slideUp { from { transform: translateY(20px); opacity: 0 } to { transform: translateY(0); opacity: 1 } }
+  @keyframes fadeOut { to { opacity: 0 } }
+  .filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+  .filters label { display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 3px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<div id="login-screen" class="wrap" style="min-height:100vh; display:flex; flex-direction:column; justify-content:center;">
+  <div class="eyebrow" style="text-align:center;">MDPL &middot; Bottling</div>
+  <h1 style="text-align:center; margin-bottom:6px;">Tele<span>metry</span></h1>
+  <p id="login-subtitle" class="readout-empty" style="text-align:center; margin-bottom:20px;">Tap your name to sign in</p>
+
+  <div id="operator-picker" style="display:grid; grid-template-columns:1fr 1fr; gap:10px;"></div>
+
+  <div id="pin-pad-screen" class="hidden">
+    <button id="pin-back-btn" style="margin-bottom:14px;">&larr; Back</button>
+    <p style="text-align:center; font-family:'Oswald',sans-serif; font-size:16px; margin-bottom:16px;" id="pin-operator-name"></p>
+    <div style="display:flex; justify-content:center; gap:10px; margin-bottom:20px;" id="pin-dots"></div>
+    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;" id="pin-keys"></div>
+  </div>
+  <p id="login-error" class="hidden" style="color:var(--red); font-size:13px; text-align:center; margin-top:14px;"></p>
+</div>
+
+<!-- ============ MAIN APP ============ -->
+<div id="main-app" class="hidden">
+  <header class="appbar">
+    <div>
+      <p style="font-family:'Oswald',sans-serif; font-weight:600; margin:0;" id="header-name"></p>
+      <p class="readout-empty" style="margin:0; font-size:11px;" id="header-role"></p>
+    </div>
+    <div style="display:flex; align-items:center; gap:10px;">
+      <div class="tab-nav" style="border:none; margin:0;" id="tab-switch">
+        <button data-tab="entry" class="tab-btn active" style="padding:6px 10px;">Entry</button>
+        <button data-tab="dashboard" id="dashboard-tab-btn" class="tab-btn hidden" style="padding:6px 10px;">Control Room</button>
+      </div>
+      <button id="logout-btn" style="padding:6px 10px; font-size:11px;">Exit</button>
+    </div>
+  </header>
+
+  <!-- ---------- OPERATOR ENTRY ---------- -->
+  <main id="entry-view" class="wrap">
+    <div class="panel" style="display:flex; gap:10px; align-items:center;">
+      <div style="flex:1;">
+        <label class="eyebrow">Line</label><br>
+        <select id="line-select" style="width:100%; margin-top:4px;"></select>
+      </div>
+      <span class="status-dot" style="margin-top:18px;"></span>
+    </div>
+
+    <div class="panel">
+      <div class="status-bar">
+        <span class="eyebrow" id="entry-product-label">Product: —</span>
+        <button id="change-product-btn" style="padding:6px 10px; font-size:10px;">Change</button>
+      </div>
+      <div id="product-picker" class="hidden" style="display:flex; gap:8px; margin-top:10px;">
+        <select id="product-select" style="flex:1;"></select>
+        <button id="set-product-btn" class="primary">Set</button>
+      </div>
+    </div>
+
+    <div id="summary-panel" class="panel"><div class="eyebrow">Loading summary&hellip;</div></div>
+
+    <div class="panel">
+      <label class="eyebrow">Production Counter</label>
+      <input id="counter-input" type="number" inputmode="decimal" step="any" placeholder="0"
+        style="width:100%; margin-top:8px; padding:16px; font-size:28px; text-align:center;" />
+      <input id="notes-input" type="text" placeholder="Notes (optional)" style="width:100%; margin-top:10px; font-family:'Inter',sans-serif; font-size:13px;" />
+      <button id="submit-reading-btn" class="primary big" style="margin-top:12px;">Add Reading</button>
+    </div>
+
+    <button id="new-shift-btn" style="width:100%; margin-bottom:16px;">Manually Start New Shift</button>
+
+    <div class="section-label">Shift Log</div>
+    <div id="shift-log-table"></div>
+  </main>
+
+  <!-- ---------- CONTROL ROOM DASHBOARD ---------- -->
+  <main id="dashboard-view" class="wrap wide hidden">
+    <div class="panel">
+      <div class="filters">
+        <div><label>Line</label><select id="filter-line"><option value="">All lines</option></select></div>
+        <div><label>Date</label><input id="filter-date" type="date" /></div>
+        <div><label>Shift status</label>
+          <select id="filter-shift-status"><option value="">All</option><option value="OPEN">Open</option><option value="CLOSED">Closed</option></select>
+        </div>
+        <button id="export-btn" class="primary" style="margin-left:auto;">Export CSV</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <span class="eyebrow">Live Readings</span>
+        <span style="display:flex; align-items:center; gap:6px; font-size:11px; color:var(--green);">
+          <span class="status-dot"></span>Live
+        </span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Time</th><th>Line</th><th>Product</th><th>Counter</th><th>Output</th><th>BPM</th><th>Notes</th></tr></thead>
+          <tbody id="dash-events-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <span class="eyebrow">Downtime Log</span>
+      <div class="table-wrap" style="margin-top:10px;">
+        <table>
+          <thead><tr><th>Start</th><th>End</th><th>Line</th><th>Type</th><th>Reason</th><th>Duration</th></tr></thead>
+          <tbody id="dash-downtime-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- ============ MODALS ============ -->
+<div id="reset-modal" class="modal-overlay">
+  <div class="modal-box">
+    <div class="eyebrow">Counter Reset Detected</div>
+    <p class="readout-empty" style="margin:8px 0 12px; font-size:12px;">This reading is lower than the last one recorded on this line — likely a meter reset or replacement. Confirm or adjust when it actually happened.</p>
+    <label>Reset happened at</label>
+    <input id="reset-checkpoint-time" type="text" placeholder="YYYY-MM-DDTHH:MM" />
+    <button id="confirm-reset-btn" class="primary big">Confirm &amp; Log Reading</button>
+  </div>
+</div>
+
+<div id="downtime-modal" class="modal-overlay">
+  <div class="modal-box">
+    <div class="eyebrow">Possible Downtime Detected</div>
+    <p id="downtime-msg" class="readout-empty" style="margin:8px 0 12px; font-size:13px;"></p>
+    <label>Type</label>
+    <select id="dt-type" style="width:100%; margin-bottom:10px;"><option>Unplanned</option><option>Planned</option></select>
+    <label>Reason</label>
+    <select id="dt-reason" style="width:100%; margin-bottom:10px;"></select>
+    <input id="dt-reason-text" type="text" placeholder="Additional detail (optional)" style="width:100%; margin-bottom:12px; font-family:'Inter',sans-serif;" />
+    <div style="display:flex; gap:8px;">
+      <button id="dt-log-btn" class="primary" style="flex:1;">Log Downtime</button>
+      <button id="dt-dismiss-btn" style="flex:1;">Not Downtime</button>
+    </div>
+  </div>
+</div>
+
+<div id="reading-result-modal" class="modal-overlay">
+  <div class="modal-box" style="text-align:center;">
+    <div class="eyebrow">Reading Logged</div>
+    <div id="rr-output" class="hero-number" style="margin:10px 0 2px;">—</div>
+    <div class="readout-empty" style="margin-bottom:10px;">bottles this interval</div>
+    <div id="rr-detail" style="font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--text-muted);"></div>
+    <div id="rr-warning" style="font-size:12px; color:var(--amber); margin-top:8px;"></div>
+    <button id="rr-close-btn" class="primary big" style="margin-top:14px;">Close</button>
+  </div>
+</div>
+
+<div id="toast-container" style="position:fixed; bottom:20px; left:0; right:0; display:flex; flex-direction:column; align-items:center; gap:8px; z-index:200; pointer-events:none;"></div>
+
+<script>
+// ============================================================
+// CONFIG
+// ============================================================
+const SUPABASE_URL = "YOUR_SUPABASE_URL";
+const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+const sb = supabase.createClient("https://xjekepsytxythsqutafa.supabase.co", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhqZWtlcHN5dHh5dGhzcXV0YWZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxOTU1MzQsImV4cCI6MjEwMjc3MTUzNH0.D3X9qzNBR1TdQRDJXuFxa7AK88S0UVIp7x-8oZ7O0vg");
+const SHIFT_BLOCK_HOURS = [6, 14, 22];
+
+// ============================================================
+// STATE
+// ============================================================
+const state = {
+  operator: null,
+  pendingPin: "", pinOperator: null,
+  lines: [], products: [], reasonCodes: [],
+  currentLine: null,
+  pendingReadingResult: null,
+  pendingResetCounter: null, pendingResetNotes: null,
+  dashboardChannel: null,
+};
+
+function toast(msg, kind = "ok") {
+  const el = document.createElement("div");
+  el.className = "toast";
+  el.style.cssText = `pointer-events:auto;padding:10px 16px;border-radius:8px;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:.04em;color:#1B1E21;background:${kind === "ok" ? "#3ECF8E" : "#E5484D"};box-shadow:0 4px 16px rgba(0,0,0,.3);`;
+  el.textContent = msg;
+  document.getElementById("toast-container").appendChild(el);
+  setTimeout(() => el.remove(), 2600);
+}
+function fmtTime(ts) { return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
+function fmtDateTime(ts) { return new Date(ts).toLocaleString([], { dateStyle: "short", timeStyle: "short" }); }
+function fmtElapsed(fromMs, toMs) {
+  const totalMin = Math.max(0, Math.floor((toMs - fromMs) / 60000));
+  const h = Math.floor(totalMin / 60), m = totalMin % 60;
+  return h === 0 ? `${m} min` : `${h} hr ${m} min`;
+}
+
+// ============================================================
+// LOGIN
+// ============================================================
+async function initLogin() {
+  const { data: session } = await sb.auth.getSession();
+  if (session?.session) {
+    const ok = await loadOperatorProfile();
+    if (ok) return showMainApp();
+  }
+  await loadOperatorPicker();
+}
+
+async function loadOperatorPicker() {
+  const { data, error } = await sb.from("operators").select("id,code,name").eq("active", true).order("name");
+  const wrap = document.getElementById("operator-picker");
+  wrap.innerHTML = "";
+  if (error) { toast("Could not load operator list", "err"); return; }
+  data.forEach(op => {
+    const btn = document.createElement("button");
+    btn.style.cssText = "padding:16px;font-family:'Oswald',sans-serif;font-size:13px;";
+    btn.textContent = op.name;
+    btn.onclick = () => openPinPad(op);
+    wrap.appendChild(btn);
+  });
+}
+
+function openPinPad(op) {
+  state.pinOperator = op; state.pendingPin = "";
+  document.getElementById("operator-picker").classList.add("hidden");
+  document.getElementById("login-subtitle").classList.add("hidden");
+  document.getElementById("pin-pad-screen").classList.remove("hidden");
+  document.getElementById("pin-operator-name").textContent = op.name;
+  document.getElementById("login-error").classList.add("hidden");
+  renderPinDots();
+  const keys = document.getElementById("pin-keys");
+  keys.innerHTML = "";
+  ["1","2","3","4","5","6","7","8","9","","0","del"].forEach(k => {
+    if (k === "") { keys.appendChild(document.createElement("div")); return; }
+    const btn = document.createElement("button");
+    btn.style.cssText = "padding:16px;font-size:18px;";
+    btn.textContent = k === "del" ? "⌫" : k;
+    btn.onclick = () => k === "del" ? pinBackspace() : pinDigit(k);
+    keys.appendChild(btn);
+  });
+}
+function renderPinDots() {
+  const wrap = document.getElementById("pin-dots");
+  wrap.innerHTML = "";
+  for (let i = 0; i < 4; i++) {
+    const d = document.createElement("div");
+    d.className = "pin-dot" + (i < state.pendingPin.length ? " filled" : "");
+    wrap.appendChild(d);
+  }
+}
+function pinDigit(d) {
+  if (state.pendingPin.length >= 4) return;
+  state.pendingPin += d;
+  renderPinDots();
+  if (state.pendingPin.length === 4) attemptLogin();
+}
+function pinBackspace() { state.pendingPin = state.pendingPin.slice(0, -1); renderPinDots(); }
+
+document.getElementById("pin-back-btn").onclick = () => {
+  document.getElementById("pin-pad-screen").classList.add("hidden");
+  document.getElementById("operator-picker").classList.remove("hidden");
+  document.getElementById("login-subtitle").classList.remove("hidden");
+};
+
+async function attemptLogin() {
+  const email = `${state.pinOperator.code.toLowerCase()}@mdpl.local`;
+  const { error } = await sb.auth.signInWithPassword({ email, password: state.pendingPin });
+  const errEl = document.getElementById("login-error");
+  if (error) {
+    errEl.textContent = "Incorrect PIN. Try again.";
+    errEl.classList.remove("hidden");
+    state.pendingPin = ""; renderPinDots();
+    return;
+  }
+  const ok = await loadOperatorProfile();
+  if (ok) showMainApp();
+}
+
+async function loadOperatorProfile() {
+  const { data: userData } = await sb.auth.getUser();
+  if (!userData?.user) return false;
+  const { data, error } = await sb.from("operators").select("id,code,name,role").eq("id", userData.user.id).single();
+  if (error || !data) { toast("Profile not found for this login", "err"); await sb.auth.signOut(); return false; }
+  state.operator = data;
+  return true;
+}
+
+document.getElementById("logout-btn").onclick = async () => {
+  await sb.auth.signOut();
+  state.operator = null;
+  if (state.dashboardChannel) sb.removeChannel(state.dashboardChannel);
+  document.getElementById("main-app").classList.add("hidden");
+  document.getElementById("login-screen").classList.remove("hidden");
+  document.getElementById("pin-pad-screen").classList.add("hidden");
+  document.getElementById("operator-picker").classList.remove("hidden");
+  document.getElementById("login-subtitle").classList.remove("hidden");
+  loadOperatorPicker();
+};
+
+// ============================================================
+// APP SHELL
+// ============================================================
+async function showMainApp() {
+  document.getElementById("login-screen").classList.add("hidden");
+  document.getElementById("main-app").classList.remove("hidden");
+  document.getElementById("header-name").textContent = state.operator.name;
+  document.getElementById("header-role").textContent = state.operator.role === "control_room" ? "Control Room" : "Operator";
+  if (state.operator.role === "control_room") document.getElementById("dashboard-tab-btn").classList.remove("hidden");
+
+  await Promise.all([loadLines(), loadProducts(), loadReasonCodes()]);
+  setTab("entry");
+  document.getElementById("counter-input").focus();
+}
+
+document.querySelectorAll(".tab-btn").forEach(btn => btn.onclick = () => setTab(btn.dataset.tab));
+function setTab(tab) {
+  document.getElementById("entry-view").classList.toggle("hidden", tab !== "entry");
+  document.getElementById("dashboard-view").classList.toggle("hidden", tab !== "dashboard");
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+  if (tab === "dashboard") initDashboard();
+}
+
+async function loadLines() {
+  const { data } = await sb.from("lines").select("*").eq("active", true).order("line_id");
+  state.lines = data || [];
+  const sel = document.getElementById("line-select");
+  sel.innerHTML = state.lines.map(l => `<option value="${l.line_id}">${l.line_name}</option>`).join("");
+  state.currentLine = localStorage.getItem("mdpl_last_line") || (state.lines[0]?.line_id || null);
+  if (state.currentLine) sel.value = state.currentLine;
+  sel.onchange = () => { state.currentLine = sel.value; localStorage.setItem("mdpl_last_line", sel.value); refreshEntryView(); };
+  await refreshEntryView();
+}
+
+async function loadProducts() {
+  const { data } = await sb.from("products").select("*").eq("active", true).order("sku_id");
+  state.products = data || [];
+  document.getElementById("product-select").innerHTML = state.products.map(p => `<option value="${p.sku_id}">${p.sku_name}</option>`).join("");
+}
+
+async function loadReasonCodes() {
+  const { data } = await sb.from("reason_codes").select("*").eq("active", true).order("label");
+  state.reasonCodes = data || [];
+  document.getElementById("dt-reason").innerHTML = state.reasonCodes.map(r => `<option value="${r.reason_code_id}">${r.label}</option>`).join("");
+  document.getElementById("dt-reason").onchange = (e) => {
+    const match = state.reasonCodes.find(r => r.reason_code_id === e.target.value);
+    if (match) document.getElementById("dt-type").value = match.default_type;
+  };
+}
+
+document.getElementById("change-product-btn").onclick = () => {
+  document.getElementById("product-picker").classList.toggle("hidden");
+};
+document.getElementById("set-product-btn").onclick = async () => {
+  const sku = document.getElementById("product-select").value;
+  const { error } = await sb.rpc("set_product", { p_line_id: state.currentLine, p_sku_id: sku });
+  if (error) { toast("Failed: " + error.message, "err"); return; }
+  toast("Product updated");
+  document.getElementById("product-picker").classList.add("hidden");
+  await refreshEntryView();
+};
+
+document.getElementById("new-shift-btn").onclick = async () => {
+  if (!confirm("Manually close the current shift and start a new one now?")) return;
+  const { error } = await sb.rpc("manual_start_new_shift", { p_line_id: state.currentLine });
+  if (error) { toast("Failed: " + error.message, "err"); return; }
+  toast("New shift started");
+  await refreshEntryView();
+};
+
+// ============================================================
+// CLIENT-SIDE INTERVAL CALC — mirrors the RPC's math, recomputed fresh on
+// every load per run, never trusted from a stored/cached value.
+// ============================================================
+function computeInterval(prev, cur) {
+  const r = { warning: null, counterReset: false, intervalDuration: null, intervalOutput: null, bpm: null };
+  if (!prev) return r;
+  const durMin = (new Date(cur.event_ts) - new Date(prev.event_ts)) / 60000;
+  if (durMin <= 0) { r.warning = "Timestamp did not move forward vs previous reading."; return r; }
+  const diff = cur.production_counter - prev.production_counter;
+  if (diff < 0) {
+    r.counterReset = true; r.intervalDuration = +durMin.toFixed(1); r.intervalOutput = cur.production_counter;
+    r.bpm = +(r.intervalOutput / durMin).toFixed(2);
+    r.warning = "Counter reset — verify manually.";
+    return r;
+  }
+  r.intervalDuration = +durMin.toFixed(1); r.intervalOutput = diff; r.bpm = +(diff / durMin).toFixed(2);
+  if (diff === 0 && durMin > 1) r.warning = "Zero production over interval.";
+  return r;
+}
+function enrichEvents(events) {
+  const lastByRun = {};
+  return events.map(e => {
+    const prev = lastByRun[e.run_id] || null;
+    const calc = computeInterval(prev, e);
+    lastByRun[e.run_id] = e;
+    return Object.assign({}, e, { interval_output: calc.intervalOutput, avg_bpm: calc.bpm, interval_duration_min: calc.intervalDuration });
+  });
+}
+function blockStart(ts) {
+  const hours = SHIFT_BLOCK_HOURS.slice().sort((a,b)=>a-b);
+  const d = new Date(ts);
+  const hour = d.getHours();
+  let bh = hours[hours.length - 1];
+  for (let i = hours.length - 1; i >= 0; i--) if (hour >= hours[i]) { bh = hours[i]; break; }
+  const bs = new Date(d); bs.setMinutes(0,0,0); bs.setHours(bh);
+  if (bh === hours[hours.length - 1] && hour < hours[0]) bs.setDate(bs.getDate() - 1);
+  return bs;
+}
+
+// ============================================================
+// ENTRY VIEW — refresh
+// ============================================================
+async function refreshEntryView() {
+  if (!state.currentLine) return;
+
+  const { data: openShift } = await sb.from("shifts").select("*").eq("line_id", state.currentLine).eq("status", "OPEN").order("started_at", { ascending: false }).limit(1).maybeSingle();
+  const { data: openRun } = await sb.from("runs").select("*").eq("line_id", state.currentLine).eq("status", "OPEN").order("started_at", { ascending: false }).limit(1).maybeSingle();
+
+  const product = state.products.find(p => p.sku_id === openRun?.sku_id);
+  document.getElementById("entry-product-label").textContent = "Product: " + (product?.sku_name || "—");
+
+  const summaryEl = document.getElementById("summary-panel");
+  if (!openShift) {
+    summaryEl.innerHTML = '<div class="eyebrow">No shift open yet — take a reading to start one.</div>';
+    document.getElementById("shift-log-table").innerHTML = "";
+    return;
+  }
+
+  const { data: rawEvents } = await sb.from("events").select("*").eq("shift_id", openShift.shift_id).order("event_ts", { ascending: true });
+  const events = enrichEvents(rawEvents || []);
+  const { data: downtime } = await sb.from("downtime_log").select("*").eq("shift_id", openShift.shift_id);
+
+  renderSummary(summaryEl, openShift, openRun, product, events, downtime || []);
+  renderShiftLogTable(events, downtime || []);
+}
+
+function renderSummary(el, shift, run, product, events, downtime) {
+  const start = new Date(shift.started_at);
+  const now = new Date();
+  if (events.length === 0) {
+    el.innerHTML = `<div class="eyebrow">Since ${fmtTime(start)}</div><div class="readout-empty" style="margin-top:8px;">No readings logged yet this shift.</div>`;
+    return;
+  }
+  const latest = events[events.length - 1];
+  const totalOutput = events.reduce((s, e) => s + (typeof e.interval_output === "number" ? e.interval_output : 0), 0);
+
+  let downtimeMin = 0, plannedMin = 0, unplannedMin = 0;
+  downtime.filter(d => d.end_ts).forEach(d => {
+    const min = (new Date(d.end_ts) - new Date(d.start_ts)) / 60000;
+    downtimeMin += min;
+    if (d.type === "Planned") plannedMin += min; else unplannedMin += min;
+  });
+  const totalDurationMin = (new Date(latest.event_ts) - start) / 60000;
+  const runTimeMin = Math.max(0, totalDurationMin - downtimeMin);
+  const rated = product?.rated_speed_bpm;
+  const speedBaseMin = runTimeMin + unplannedMin;
+  const shiftAvg = (speedBaseMin > 0) ? totalOutput / speedBaseMin : null;
+
+  let html = `<div class="eyebrow">Since ${fmtTime(start)}</div>`;
+  html += `<div class="hero-block" style="margin-top:8px;"><div class="hero-label">Output (this shift)</div><span class="hero-number">${totalOutput.toLocaleString()}</span><span class="hero-unit">bottles</span></div>`;
+
+  if (rated && shiftAvg !== null) {
+    const pct = Math.round((shiftAvg / rated) * 100);
+    html += `<div class="perf-block"><div class="hero-label">Performance (Availability × Speed)*</div><div class="perf-pct">${pct}%</div>
+      <div class="progress-track"><div class="progress-fill" style="width:${Math.min(100, Math.max(0, pct))}%;"></div></div>
+      <div class="readout-empty" style="margin-top:6px;">Actual: ${Math.round(shiftAvg)} BPM · Rated: ${Math.round(rated)} BPM<br>* Availability × Performance, not full OEE.</div></div>`;
+  } else {
+    html += `<div class="perf-block"><div class="readout-empty">Set a rated speed on this product to show Performance.</div></div>`;
+  }
+
+  const downCell = downtimeMin === 0 ? "0 min" :
+    [plannedMin > 0 ? `Planned ${fmtElapsed(0, plannedMin * 60000)}` : "", unplannedMin > 0 ? `Unplanned ${fmtElapsed(0, unplannedMin * 60000)}` : ""].filter(Boolean).join("<br>");
+
+  html += `<div class="time-grid"><div><div class="time-cell-label">Run Time</div><div class="time-cell-value">${fmtElapsed(0, runTimeMin * 60000)}</div></div>
+    <div><div class="time-cell-label">Down Time</div><div class="time-cell-value" style="font-size:13px;">${downCell}</div></div></div>`;
+  html += `<div class="readout-empty" style="margin-top:10px;">Last reading ${fmtElapsed(new Date(latest.event_ts).getTime(), now.getTime())} ago</div>`;
+  el.innerHTML = html;
+}
+
+function renderShiftLogTable(events, downtime) {
+  const rows = events.slice().reverse();
+  let html = '<div class="table-wrap"><table><thead><tr><th>Time</th><th>Output</th><th>BPM</th><th>Counter</th></tr></thead><tbody>';
+  if (rows.length === 0) {
+    html = '<div class="readout-empty">No readings yet this shift.</div>';
+  } else {
+    rows.forEach(e => {
+      html += `<tr><td>${fmtTime(e.event_ts)}</td><td>${e.interval_output ?? "-"}</td><td>${e.avg_bpm ?? "-"}</td><td>${e.production_counter}</td></tr>`;
+    });
+    html += "</tbody></table></div>";
+  }
+  if (downtime.length > 0) {
+    html += '<div class="section-label">Downtime this shift</div><div class="table-wrap"><table><thead><tr><th>Start</th><th>End</th><th>Type</th><th>Duration</th></tr></thead><tbody>';
+    downtime.slice().reverse().forEach(d => {
+      html += `<tr><td>${d.start_ts ? fmtTime(d.start_ts) : "-"}</td><td>${d.end_ts ? fmtTime(d.end_ts) : "ongoing"}</td><td>${d.type || "-"}</td><td>${d.duration_min ?? "-"} min</td></tr>`;
+    });
+    html += "</tbody></table></div>";
+  }
+  document.getElementById("shift-log-table").innerHTML = html;
+}
+
+// ============================================================
+// SUBMIT READING
+// ============================================================
+document.getElementById("submit-reading-btn").onclick = async () => {
+  const counter = parseFloat(document.getElementById("counter-input").value);
+  if (isNaN(counter)) { toast("Enter a counter value", "err"); return; }
+  const notes = document.getElementById("notes-input").value.trim() || null;
+  await submitReading(counter, notes, null);
+};
+
+async function submitReading(counter, notes, confirmedCheckpointTs) {
+  const btn = document.getElementById("submit-reading-btn");
+  btn.disabled = true; btn.textContent = "Saving...";
+
+  const { data, error } = await sb.rpc("log_reading", {
+    p_line_id: state.currentLine, p_counter: counter, p_notes: notes,
+    p_confirmed_checkpoint_ts: confirmedCheckpointTs,
+  });
+
+  btn.disabled = false; btn.textContent = "Add Reading";
+
+  if (error) { toast("Save failed: " + error.message, "err"); return; }
+
+  if (data.needs_reset_confirmation) {
+    state.pendingResetCounter = counter;
+    state.pendingResetNotes = notes;
+    const suggested = new Date(data.suggested_checkpoint_ts);
+    document.getElementById("reset-checkpoint-time").value = suggested.toISOString().slice(0, 16);
+    document.getElementById("reset-modal").classList.add("open");
+    return;
+  }
+
+  document.getElementById("counter-input").value = "";
+  document.getElementById("notes-input").value = "";
+  showReadingResult(data);
+  await refreshEntryView();
+}
+
+document.getElementById("confirm-reset-btn").onclick = async () => {
+  const ts = document.getElementById("reset-checkpoint-time").value;
+  if (!ts) { toast("Enter the reset time", "err"); return; }
+  document.getElementById("reset-modal").classList.remove("open");
+  await submitReading(state.pendingResetCounter, state.pendingResetNotes, new Date(ts).toISOString());
+};
+
+function showReadingResult(res) {
+  document.getElementById("rr-output").textContent = typeof res.interval_output === "number" ? res.interval_output.toLocaleString() : "—";
+  const parts = [];
+  if (typeof res.interval_bpm === "number") parts.push(res.interval_bpm + " BPM");
+  if (typeof res.interval_duration_min === "number") parts.push(res.interval_duration_min + " min interval");
+  document.getElementById("rr-detail").textContent = parts.join(" · ");
+  document.getElementById("rr-warning").textContent = res.warning || "";
+  document.getElementById("reading-result-modal").classList.add("open");
+  state.pendingReadingResult = res;
+}
+document.getElementById("rr-close-btn").onclick = () => {
+  document.getElementById("reading-result-modal").classList.remove("open");
+  const res = state.pendingReadingResult;
+  state.pendingReadingResult = null;
+  if (res?.downtime_prompt) showDowntimePrompt(res.downtime_prompt);
+};
+
+function showDowntimePrompt(dp) {
+  document.getElementById("downtime-msg").textContent =
+    `${dp.inferred_downtime_min} min possible downtime — ran at ${dp.interval_bpm} BPM vs rated ${dp.rated_speed} BPM.`;
+  document.getElementById("dt-reason").dispatchEvent(new Event("change"));
+  state.pendingDowntime = dp;
+  document.getElementById("downtime-modal").classList.add("open");
+}
+document.getElementById("dt-dismiss-btn").onclick = () => document.getElementById("downtime-modal").classList.remove("open");
+document.getElementById("dt-log-btn").onclick = async () => {
+  const dp = state.pendingDowntime;
+  const type = document.getElementById("dt-type").value;
+  const reasonCodeId = document.getElementById("dt-reason").value;
+  const reasonText = document.getElementById("dt-reason-text").value.trim() || null;
+  const { error } = await sb.rpc("log_downtime", {
+    p_line_id: state.currentLine, p_start_ts: dp.inferred_start_ts, p_end_ts: dp.inferred_end_ts,
+    p_type: type, p_reason_code_id: reasonCodeId, p_reason_text: reasonText,
+  });
+  document.getElementById("downtime-modal").classList.remove("open");
+  document.getElementById("dt-reason-text").value = "";
+  if (error) { toast("Failed: " + error.message, "err"); return; }
+  toast("Downtime logged");
+  await refreshEntryView();
+};
+
+// ============================================================
+// CONTROL ROOM DASHBOARD
+// ============================================================
+async function initDashboard() {
+  const lineSel = document.getElementById("filter-line");
+  if (lineSel.options.length <= 1) {
+    lineSel.innerHTML = '<option value="">All lines</option>' + state.lines.map(l => `<option value="${l.line_id}">${l.line_name}</option>`).join("");
+  }
+  document.getElementById("filter-date").value = new Date().toISOString().slice(0, 10);
+  ["filter-line", "filter-date", "filter-shift-status"].forEach(id => document.getElementById(id).addEventListener("input", refreshDashboard));
+  document.getElementById("export-btn").onclick = exportCsv;
+  await refreshDashboard();
+  subscribeRealtime();
+}
+
+let lastDashRows = [];
+
+async function refreshDashboard() {
+  const line = document.getElementById("filter-line").value;
+  const dateStr = document.getElementById("filter-date").value;
+  const dayStart = new Date(dateStr + "T00:00:00").toISOString();
+  const dayEnd = new Date(dateStr + "T23:59:59").toISOString();
+
+  let q = sb.from("events").select("*, lines(line_name), runs(sku_id)").gte("event_ts", dayStart).lte("event_ts", dayEnd).order("event_ts", { ascending: false });
+  if (line) q = q.eq("line_id", line);
+  const { data: events, error } = await q;
+  if (error) { toast("Dashboard load failed", "err"); return; }
+
+  const grouped = {};
+  (events || []).slice().reverse().forEach(e => {
+    if (!grouped[e.run_id]) grouped[e.run_id] = [];
+    grouped[e.run_id].push(e);
+  });
+  Object.values(grouped).forEach(list => {
+    list.forEach((e, i) => {
+      const calc = computeInterval(i > 0 ? list[i - 1] : null, e);
+      e.interval_output = calc.intervalOutput; e.avg_bpm = calc.bpm;
+    });
+  });
+  lastDashRows = (events || []).slice();
+  renderDashEvents(lastDashRows);
+
+  let dq = sb.from("downtime_log").select("*, lines(line_name)").gte("start_ts", dayStart).lte("start_ts", dayEnd).order("start_ts", { ascending: false });
+  if (line) dq = dq.eq("line_id", line);
+  const { data: downtime } = await dq;
+  renderDashDowntime(downtime || []);
+}
+
+function renderDashEvents(rows) {
+  const body = document.getElementById("dash-events-body");
+  body.innerHTML = rows.map(e => {
+    const product = state.products.find(p => p.sku_id === e.runs?.sku_id);
+    return `<tr><td>${fmtTime(e.event_ts)}</td><td>${e.lines?.line_name || e.line_id}</td><td>${product?.sku_name || "-"}</td>
+      <td>${e.production_counter}</td><td>${e.interval_output ?? "-"}</td><td>${e.avg_bpm ?? "-"}</td><td style="font-size:11px;">${e.notes || ""}</td></tr>`;
+  }).join("") || `<tr><td colspan="7" style="text-align:center;color:var(--text-muted);">No readings for this filter.</td></tr>`;
+}
+
+function renderDashDowntime(rows) {
+  const body = document.getElementById("dash-downtime-body");
+  body.innerHTML = rows.map(d => {
+    const reason = state.reasonCodes.find(r => r.reason_code_id === d.reason_code_id);
+    return `<tr><td>${fmtTime(d.start_ts)}</td><td>${d.end_ts ? fmtTime(d.end_ts) : "ongoing"}</td><td>${d.lines?.line_name || d.line_id}</td>
+      <td>${d.type || "-"}</td><td>${reason?.label || d.reason_code_id || "-"}</td><td>${d.duration_min ?? "-"} min</td></tr>`;
+  }).join("") || `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);">No downtime logged.</td></tr>`;
+}
+
+function subscribeRealtime() {
+  if (state.dashboardChannel) return;
+  state.dashboardChannel = sb.channel("telemetry_live")
+    .on("postgres_changes", { event: "*", schema: "public", table: "events" }, refreshDashboard)
+    .on("postgres_changes", { event: "*", schema: "public", table: "downtime_log" }, refreshDashboard)
+    .subscribe();
+}
+
+function exportCsv() {
+  if (lastDashRows.length === 0) { toast("Nothing to export", "err"); return; }
+  const headers = ["Time","Line","Counter","Output","BPM","Notes"];
+  const lines = [headers.join(",")];
+  lastDashRows.forEach(e => {
+    const row = [fmtDateTime(e.event_ts), e.lines?.line_name || e.line_id, e.production_counter, e.interval_output ?? "", e.avg_bpm ?? "", e.notes || ""]
+      .map(v => `"${String(v ?? "").replace(/"/g, '""')}"`);
+    lines.push(row.join(","));
+  });
+  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `telemetry-${document.getElementById("filter-date").value}.csv`; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ============================================================
+initLogin();
+</script>
+</body>
+</html>
