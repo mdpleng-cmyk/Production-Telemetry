@@ -1,4 +1,3 @@
-/**
  * TELEMETRY — MODULE MAP (Supabase rebuild, Aug 2026)
  * ==========================================================
  * MDPL bottling — multi-line, multi-product web app.
