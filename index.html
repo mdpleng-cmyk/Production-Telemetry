@@ -775,12 +775,15 @@ function renderSummary(el, shift, run, product, events, downtime) {
 
 function renderShiftLogTable(events, downtime) {
   const rows = events.slice().reverse();
-  let html = '<div class="table-wrap"><table><thead><tr><th>Time</th><th>Output</th><th>BPM</th><th>Counter</th></tr></thead><tbody>';
+  const isControlRoom = state.operator?.role === "control_room";
+  const delTh = isControlRoom ? "<th></th>" : "";
+  let html = `<div class="table-wrap"><table><thead><tr><th>Time</th><th>Output</th><th>BPM</th><th>Counter</th>${delTh}</tr></thead><tbody>`;
   if (rows.length === 0) {
     html = '<div class="readout-empty">No readings yet this shift.</div>';
   } else {
     rows.forEach(e => {
-      html += `<tr><td>${fmtTime(e.event_ts)}</td><td>${e.interval_output ?? "-"}</td><td>${e.avg_bpm ?? "-"}</td><td>${e.production_counter}</td></tr>`;
+      const delTd = isControlRoom ? `<td><button data-del-event="${e.event_id}" style="padding:4px 8px;font-size:10px;color:var(--red);">Del</button></td>` : "";
+      html += `<tr><td>${fmtTime(e.event_ts)}</td><td>${e.interval_output ?? "-"}</td><td>${e.avg_bpm ?? "-"}</td><td>${e.production_counter}</td>${delTd}</tr>`;
     });
     html += "</tbody></table></div>";
   }
@@ -860,6 +863,17 @@ document.getElementById("bd-submit-btn").onclick = async () => {
   document.getElementById("bd-notes").value = "";
   await refreshEntryView();
 };
+document.getElementById("shift-log-table").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-del-event]");
+  if (!btn) return;
+  const eventId = btn.dataset.delEvent;
+  if (!confirm("Delete this reading? This will recompute the interval for the next reading against whatever came before it.")) return;
+  btn.disabled = true; btn.textContent = "...";
+  const { error } = await sb.rpc("delete_reading", { p_event_id: eventId });
+  if (error) { toast("Failed: " + error.message, "err"); btn.disabled = false; btn.textContent = "Del"; return; }
+  toast("Reading deleted");
+  await refreshEntryView();
+});
 
 function showReadingResult(res) {
   document.getElementById("rr-output").textContent = typeof res.interval_output === "number" ? res.interval_output.toLocaleString() : "—";
