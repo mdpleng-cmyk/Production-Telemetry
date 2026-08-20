@@ -249,6 +249,21 @@
   </div>
 </div>
 
+<div id="backdate-modal" class="modal-overlay">
+  <div class="modal-box">
+    <div class="eyebrow">Add Backdated Reading</div>
+    <label>When</label>
+    <input id="bd-datetime" type="text" placeholder="YYYY-MM-DDTHH:MM" style="width:100%;margin-bottom:10px;" />
+    <label>Counter</label>
+    <input id="bd-counter" type="number" step="any" style="width:100%;margin-bottom:10px;" />
+    <input id="bd-notes" type="text" placeholder="Notes (optional)" style="width:100%;margin-bottom:12px;font-family:'Inter',sans-serif;" />
+    <div style="display:flex;gap:8px;">
+      <button id="bd-submit-btn" class="primary" style="flex:1;">Add Reading</button>
+      <button id="bd-cancel-btn" style="flex:1;">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast-container" style="position:fixed; bottom:20px; left:0; right:0; display:flex; flex-direction:column; align-items:center; gap:8px; z-index:200; pointer-events:none;"></div>
 
 <script>
@@ -800,6 +815,28 @@ document.getElementById("confirm-reset-btn").onclick = async () => {
   if (!ts) { toast("Enter the reset time", "err"); return; }
   document.getElementById("reset-modal").classList.remove("open");
   await submitReading(state.pendingResetCounter, state.pendingResetNotes, new Date(ts).toISOString());
+};
+
+document.getElementById("bd-cancel-btn").onclick = () => document.getElementById("backdate-modal").classList.remove("open");
+document.getElementById("bd-submit-btn").onclick = async () => {
+  const ts = document.getElementById("bd-datetime").value;
+  const counter = parseFloat(document.getElementById("bd-counter").value);
+  if (!ts || isNaN(counter)) { toast("Enter time and counter", "err"); return; }
+  const btn = document.getElementById("bd-submit-btn");
+  btn.disabled = true; btn.textContent = "Saving...";
+  const { error } = await sb.rpc("insert_backdated_reading", {
+    p_line_id: state.currentLine,
+    p_event_ts: new Date(ts).toISOString(),
+    p_counter: counter,
+    p_notes: document.getElementById("bd-notes").value.trim() || null,
+  });
+  btn.disabled = false; btn.textContent = "Add Reading";
+  if (error) { toast("Failed: " + error.message, "err"); return; }
+  toast("Backdated reading added");
+  document.getElementById("backdate-modal").classList.remove("open");
+  document.getElementById("bd-counter").value = "";
+  document.getElementById("bd-notes").value = "";
+  await refreshEntryView();
 };
 
 function showReadingResult(res) {

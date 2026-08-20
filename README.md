@@ -72,6 +72,12 @@
  *   set_product(p_line_id, p_sku_id)
  *       Operator-driven changeover. Closes the open run, opens a new one
  *       on the same shift with the new sku_id.
+ *   insert_backdated_reading(p_line_id, p_event_ts, p_counter, p_notes)
+ *       Control-room only. Looks up the shift/run covering p_event_ts
+ *       (not "now") and writes a raw READING event into it. Skips reset
+ *       detection and downtime auto-inference — both assume the reading
+ *       just happened. Raises if no shift/run covers that timestamp,
+ *       rather than creating one.
  *
  * HELPER FUNCTIONS (not called from the frontend)
  *   is_control_room()          - RLS helper, checks operators.role
@@ -144,6 +150,20 @@
  * 5. RATED SPEED LIVES ON products, keyed off the run's sku_id — never a
  *    global constant. Multi-line, multi-product correctness depends on
  *    this exactly as it did in the original.
+ * 6. BACKDATED READINGS use a separate RPC (insert_backdated_reading),
+ *    not log_reading with an optional timestamp param. Reason: log_reading's
+ *    shift/run resolution, reset detection, and downtime inference all
+ *    implicitly assume "this reading just happened" (resolve against now(),
+ *    diff against the last-written row). Backdating needs shift/run
+ *    *lookup* against an arbitrary past timestamp instead, and must skip
+ *    reset/downtime auto-detection entirely — those don't make sense for
+ *    a reading inserted after the fact. Control-room role only. Fails loud
+ *    (raises) if no shift/run covers the given timestamp rather than
+ *    creating one — deliberately no auto-create-shift-in-the-past path, to
+ *    avoid retroactively altering shift boundaries. Inserted rows still
+ *    flow through the same RECOMPUTE, NEVER FREEZE model — enrichEvents()
+ *    naturally slots them in by event_ts and recalculates neighboring
+ *    intervals, no separate backfill logic needed.
  *
  * DROPPED FROM ORIGINAL (deliberate, not oversights)
  * -----------------------------------------------------------
