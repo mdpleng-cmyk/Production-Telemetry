@@ -1,3 +1,4 @@
+/**
  * TELEMETRY — MODULE MAP (Supabase rebuild, Aug 2026)
  * ==========================================================
  * MDPL bottling — multi-line, multi-product web app.
@@ -195,4 +196,34 @@
  * old ShiftLog rows have no line_id/sku_id/shift_id/run_id to attach to,
  * same limitation the original module map already noted for its own
  * predecessor.
+ *
+ * MAINTAINING THIS FILE
+ * -----------------------------------------------------------
+ * This file is the repo's README on GitHub — it's the first thing anyone
+ * (human or AI) sees when they open the project, and it should be enough
+ * on its own to understand the system without digging through commit
+ * history or old chat threads.
+ *
+ * If you are an AI asked to make a change here:
+ *   1. Read this whole file before touching any code — it front-loads the
+ *      "why" behind decisions that aren't obvious from the code alone
+ *      (e.g. why writes go through RPCs instead of direct inserts, why
+ *      interval math is computed twice instead of shared).
+ *   2. Prefer find-and-replace / targeted diffs over rewriting whole
+ *      files. telemetry_index.html and telemetry_schema.sql are meant to
+ *      be edited incrementally, not regenerated — a full rewrite risks
+ *      silently dropping something (a policy, an edge case, a comment
+ *      explaining a gotcha) that isn't obvious is load-bearing.
+ *   3. After making a change, update this file in the same pass:
+ *        - New table/column/RPC → add it under DATABASE OBJECTS.
+ *        - New architecture decision or non-obvious trade-off → add a
+ *          numbered entry under ARCHITECTURE DECISIONS AND WHY.
+ *        - Shipped something that was listed under DELIBERATELY NOT BUILT
+ *          YET → remove it from that list.
+ *        - Hit a bug caused by a library/API quirk (like the make_interval
+ *          type mismatch) → add it under KNOWN GOTCHAS, even after fixing
+ *          it, so the next person doesn't rediscover it the hard way.
+ *   4. Don't leave this file stale. A module map that doesn't match the
+ *      code is worse than no module map — it actively misleads whoever
+ *      reads it next.
  */
