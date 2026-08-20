@@ -286,6 +286,7 @@ const state = {
   pendingReadingResult: null,
   pendingResetCounter: null, pendingResetNotes: null,
   dashboardChannel: null,
+  entryChannel: null,
 };
 
 function toast(msg, kind = "ok") {
@@ -430,6 +431,17 @@ async function showMainApp() {
   await Promise.all([loadLines(), loadProducts(), loadReasonCodes()]);
   setTab("entry");
   document.getElementById("counter-input").focus();
+  subscribeEntryRealtime();
+}
+
+function subscribeEntryRealtime() {
+  if (state.entryChannel) return;
+  state.entryChannel = sb.channel("telemetry_entry_live")
+    .on("postgres_changes", { event: "*", schema: "public", table: "events" }, () => refreshEntryView())
+    .on("postgres_changes", { event: "*", schema: "public", table: "downtime_log" }, () => refreshEntryView())
+    .on("postgres_changes", { event: "*", schema: "public", table: "runs" }, () => refreshEntryView())
+    .on("postgres_changes", { event: "*", schema: "public", table: "shifts" }, () => refreshEntryView())
+    .subscribe();
 }
 
 document.querySelectorAll(".tab-btn").forEach(btn => btn.onclick = () => setTab(btn.dataset.tab));
