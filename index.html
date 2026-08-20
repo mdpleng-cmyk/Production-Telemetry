@@ -415,7 +415,17 @@ async function showMainApp() {
   document.getElementById("main-app").classList.remove("hidden");
   document.getElementById("header-name").textContent = state.operator.name;
   document.getElementById("header-role").textContent = state.operator.role === "control_room" ? "Control Room" : "Operator";
-  if (state.operator.role === "control_room") document.getElementById("dashboard-tab-btn").classList.remove("hidden");
+  if (state.operator.role === "control_room") {
+    document.getElementById("dashboard-tab-btn").classList.remove("hidden");
+    const bdBtn = document.createElement("button");
+    bdBtn.textContent = "Add Backdated Reading";
+    bdBtn.style.cssText = "width:100%; margin-bottom:16px;";
+    bdBtn.onclick = () => {
+      document.getElementById("bd-datetime").value = new Date().toISOString().slice(0, 16);
+      document.getElementById("backdate-modal").classList.add("open");
+    };
+    document.getElementById("new-shift-btn").after(bdBtn);
+  }
 
   await Promise.all([loadLines(), loadProducts(), loadReasonCodes()]);
   setTab("entry");
