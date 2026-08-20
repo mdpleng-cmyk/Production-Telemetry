@@ -165,7 +165,11 @@
  *
  * DELIBERATELY NOT BUILT YET (fast-follow candidates, not forgotten)
  * -----------------------------------------------------------
- * - Rolling 24h SVG trend graph (buildTrendGraphSvg_ in the original).
+ * - Rolling 24h SVG BPM trend graph (buildTrendGraphSvg_ in the original).
+ *   NOTE: the today-overview TIMELINE BAR (buildTimelineBar_ equivalent —
+ *   colored segments showing when CIP/changeover/downtime happened across
+ *   the day) IS built as of the Aug 2026 entry-view rework below. Only the
+ *   line-chart-style BPM trend graph is still missing.
  * - Hourly-breakdown grid on the History view (interpolateCounterAt_).
  * - Quality/scrap tracking — same extension point as the original design:
  *   add a `quality_log` table keyed by run_id (id, timestamp, category,
@@ -188,6 +192,36 @@
  *   inside current_block_start(), and again as a plain JS array
  *   (SHIFT_BLOCK_HOURS) in telemetry_index.html for the client-side
  *   blockStart() helper. Keep both in sync if this ever changes.
+ *
+ * ENTRY-VIEW REWORK (Aug 2026)
+ * -----------------------------------------------------------
+ * Reordered for operator workflow — reading entry is the first thing
+ * visible on load, no scrolling required:
+ *   1. Compact line/product bar (line <select> auto-hides via
+ *      loadLines() when state.lines.length <= 1 — currently true, only
+ *      line L1 exists — and shows a plain text label instead; reappears
+ *      automatically the moment a second active line is added, no code
+ *      change needed)
+ *   2. Counter input + Add Reading (was previously below the fold)
+ *   3. Today's Total (all shifts) — refreshTodayTotal(), ports
+ *      buildDayTotalHtml_. Pulls events from (today's midnight - 24h) for
+ *      interval-calc context, sums interval_output for events >= today's
+ *      midnight only.
+ *   4. Today's Overview — refreshTodayOverview() / buildTimelineBar() in
+ *      telemetry_index.html, ports buildTimelineBar_. Colored segments
+ *      (CIP blue, changeover purple, label-change pink, planned amber,
+ *      unplanned red) across the full 00:00–24:00 day for the current
+ *      line, plus a grey "future" segment for time not yet elapsed and a
+ *      dimmed "stale" segment if the last reading is >10 min old.
+ *   5. This Shift (was "summary-panel", unchanged content, now demoted
+ *      below Today's Total/Overview since day-level context ranks above
+ *      shift-level for the operator's actual question — "how's today
+ *      going")
+ *   6. Manually Start New Shift / Shift Log (unchanged, still at bottom)
+ * If more lines get added later, revisit whether Today's Total/Overview
+ * should also gain a line-scoping affordance beyond the existing
+ * line-select — right now both silently follow state.currentLine, same
+ * as the shift summary always did.
  *
  * SETUP / MIGRATING DATA
  * -----------------------------------------------------------

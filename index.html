@@ -66,6 +66,18 @@
   .filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
   .filters label { display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 3px; }
   .hidden { display: none !important; }
+  .timeline-track { position: relative; height: 12px; background: var(--green); border-radius: 4px; overflow: hidden; margin: 10px 0 6px; }
+  .timeline-segment { position: absolute; top: 0; height: 100%; }
+  .timeline-segment.unplanned { background: var(--red); }
+  .timeline-segment.planned { background: var(--amber); }
+  .timeline-segment.cip { background: #4DA3FF; }
+  .timeline-segment.changeover { background: #B388FF; }
+  .timeline-segment.labelchange { background: #FF6FA5; }
+  .timeline-segment.stale { background: var(--text-muted); opacity: 0.5; }
+  .timeline-segment.future { background: var(--bg); }
+  .legend-row { display: flex; flex-wrap: wrap; gap: 10px; margin: 8px 0 2px; }
+  .legend-item { display: flex; align-items: center; gap: 4px; font-family: 'Inter', sans-serif; font-size: 10px; color: var(--text-muted); }
+  .dot-sm { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
 </style>
 </head>
 <body>
@@ -105,27 +117,24 @@
 
   <!-- ---------- OPERATOR ENTRY ---------- -->
   <main id="entry-view" class="wrap">
-    <div class="panel" style="display:flex; gap:10px; align-items:center;">
-      <div style="flex:1;">
-        <label class="eyebrow">Line</label><br>
-        <select id="line-select" style="width:100%; margin-top:4px;"></select>
+
+    <!-- Compact line/product bar — line selector only shows if there's more than one line. -->
+    <div id="line-product-bar" style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; font-size:12px; color:var(--text-muted);">
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <span class="status-dot"></span>
+        <span id="line-name-label">Line</span>
+        <select id="line-select" class="hidden" style="padding:4px 8px; font-size:12px;"></select>
+        <span>&middot;</span>
+        <span id="entry-product-label">Product: —</span>
       </div>
-      <span class="status-dot" style="margin-top:18px;"></span>
+      <button id="change-product-btn" style="padding:5px 9px; font-size:10px;">Change</button>
+    </div>
+    <div id="product-picker" class="hidden panel" style="display:flex; gap:8px; margin-bottom:10px;">
+      <select id="product-select" style="flex:1;"></select>
+      <button id="set-product-btn" class="primary">Set</button>
     </div>
 
-    <div class="panel">
-      <div class="status-bar">
-        <span class="eyebrow" id="entry-product-label">Product: —</span>
-        <button id="change-product-btn" style="padding:6px 10px; font-size:10px;">Change</button>
-      </div>
-      <div id="product-picker" class="hidden" style="display:flex; gap:8px; margin-top:10px;">
-        <select id="product-select" style="flex:1;"></select>
-        <button id="set-product-btn" class="primary">Set</button>
-      </div>
-    </div>
-
-    <div id="summary-panel" class="panel"><div class="eyebrow">Loading summary&hellip;</div></div>
-
+    <!-- Reading entry — first thing visible, no scrolling needed. -->
     <div class="panel">
       <label class="eyebrow">Production Counter</label>
       <input id="counter-input" type="number" inputmode="decimal" step="any" placeholder="0"
@@ -133,6 +142,23 @@
       <input id="notes-input" type="text" placeholder="Notes (optional)" style="width:100%; margin-top:10px; font-family:'Inter',sans-serif; font-size:13px;" />
       <button id="submit-reading-btn" class="primary big" style="margin-top:12px;">Add Reading</button>
     </div>
+
+    <!-- Today's total, across all shifts. -->
+    <div id="today-total-panel" class="panel">
+      <div class="hero-block" style="margin-bottom:0;">
+        <div class="hero-label">Today's Total (all shifts)</div>
+        <span class="hero-number" id="today-total-value" style="font-size:32px;">—</span><span class="hero-unit">bottles</span>
+      </div>
+    </div>
+
+    <!-- Today's overview — when CIP/changeover/downtime happened across the day. -->
+    <div class="panel">
+      <span class="eyebrow">Today's Overview</span>
+      <div id="today-overview"></div>
+    </div>
+
+    <div class="section-label">This Shift</div>
+    <div id="summary-panel" class="panel"><div class="eyebrow">Loading summary&hellip;</div></div>
 
     <button id="new-shift-btn" style="width:100%; margin-bottom:16px;">Manually Start New Shift</button>
 
@@ -226,7 +252,7 @@
 // ============================================================
 const SUPABASE_URL = "YOUR_SUPABASE_URL";
 const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
-const sb = supabase.createClient("https://xjekepsytxythsqutafa.supabase.co", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhqZWtlcHN5dHh5dGhzcXV0YWZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxOTU1MzQsImV4cCI6MjEwMjc3MTUzNH0.D3X9qzNBR1TdQRDJXuFxa7AK88S0UVIp7x-8oZ7O0vg");
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const SHIFT_BLOCK_HOURS = [6, 14, 22];
 
 // ============================================================
@@ -388,10 +414,21 @@ async function loadLines() {
   const { data } = await sb.from("lines").select("*").eq("active", true).order("line_id");
   state.lines = data || [];
   const sel = document.getElementById("line-select");
+  const label = document.getElementById("line-name-label");
   sel.innerHTML = state.lines.map(l => `<option value="${l.line_id}">${l.line_name}</option>`).join("");
   state.currentLine = localStorage.getItem("mdpl_last_line") || (state.lines[0]?.line_id || null);
-  if (state.currentLine) sel.value = state.currentLine;
-  sel.onchange = () => { state.currentLine = sel.value; localStorage.setItem("mdpl_last_line", sel.value); refreshEntryView(); };
+
+  if (state.lines.length > 1) {
+    sel.classList.remove("hidden");
+    label.classList.add("hidden");
+    if (state.currentLine) sel.value = state.currentLine;
+    sel.onchange = () => { state.currentLine = sel.value; localStorage.setItem("mdpl_last_line", sel.value); refreshEntryView(); };
+  } else {
+    sel.classList.add("hidden");
+    label.classList.remove("hidden");
+    const line = state.lines.find(l => l.line_id === state.currentLine);
+    label.textContent = line ? line.line_name : "Line";
+  }
   await refreshEntryView();
 }
 
@@ -487,15 +524,105 @@ async function refreshEntryView() {
   if (!openShift) {
     summaryEl.innerHTML = '<div class="eyebrow">No shift open yet — take a reading to start one.</div>';
     document.getElementById("shift-log-table").innerHTML = "";
-    return;
+  } else {
+    const { data: rawEvents } = await sb.from("events").select("*").eq("shift_id", openShift.shift_id).order("event_ts", { ascending: true });
+    const events = enrichEvents(rawEvents || []);
+    const { data: downtime } = await sb.from("downtime_log").select("*").eq("shift_id", openShift.shift_id);
+
+    renderSummary(summaryEl, openShift, openRun, product, events, downtime || []);
+    renderShiftLogTable(events, downtime || []);
   }
 
-  const { data: rawEvents } = await sb.from("events").select("*").eq("shift_id", openShift.shift_id).order("event_ts", { ascending: true });
-  const events = enrichEvents(rawEvents || []);
-  const { data: downtime } = await sb.from("downtime_log").select("*").eq("shift_id", openShift.shift_id);
+  await refreshTodayTotal();
+  await refreshTodayOverview();
+}
 
-  renderSummary(summaryEl, openShift, openRun, product, events, downtime || []);
-  renderShiftLogTable(events, downtime || []);
+async function refreshTodayTotal() {
+  const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
+  const lookbackStart = new Date(dayStart.getTime() - 24 * 60 * 60000); // extra day of context so the first reading after midnight has a `prev` to diff against
+  const { data: rawEvents } = await sb.from("events").select("*").eq("line_id", state.currentLine)
+    .gte("event_ts", lookbackStart.toISOString()).order("event_ts", { ascending: true });
+  const events = enrichEvents(rawEvents || []);
+  const total = events
+    .filter(e => new Date(e.event_ts) >= dayStart)
+    .reduce((s, e) => s + (typeof e.interval_output === "number" ? e.interval_output : 0), 0);
+  document.getElementById("today-total-value").textContent = total.toLocaleString();
+}
+
+function downtimeColorClass(reasonLabel, type) {
+  if (reasonLabel === "CIP") return "cip";
+  if (reasonLabel === "Product Changeover") return "changeover";
+  if (reasonLabel === "Label Change") return "labelchange";
+  return type === "Planned" ? "planned" : "unplanned";
+}
+
+async function refreshTodayOverview() {
+  const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
+  const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60000);
+  const now = new Date();
+
+  const { data: downtime } = await sb.from("downtime_log").select("*").eq("line_id", state.currentLine)
+    .gte("start_ts", dayStart.toISOString()).lte("start_ts", dayEnd.toISOString());
+  const { data: lastEvent } = await sb.from("events").select("event_ts").eq("line_id", state.currentLine)
+    .order("event_ts", { ascending: false }).limit(1).maybeSingle();
+
+  const latestTs = lastEvent ? new Date(lastEvent.event_ts) : dayStart;
+  const el = document.getElementById("today-overview");
+  el.innerHTML = buildTimelineBar(dayStart, dayEnd, downtime || [], latestTs, now);
+}
+
+function buildTimelineBar(scaleStart, scaleEnd, downtimeRows, latestTs, now) {
+  const totalMs = scaleEnd.getTime() - scaleStart.getTime();
+  if (totalMs <= 0) return "";
+
+  let segments = "";
+  const seenClasses = {};
+
+  downtimeRows.forEach(d => {
+    if (!d.start_ts || !d.end_ts) return;
+    const dStart = new Date(d.start_ts).getTime(), dEnd = new Date(d.end_ts).getTime();
+    const segStart = Math.max(dStart, scaleStart.getTime());
+    const segEnd = Math.min(dEnd, scaleEnd.getTime());
+    if (segEnd <= segStart) return;
+    const leftPct = ((segStart - scaleStart.getTime()) / totalMs) * 100;
+    const widthPct = ((segEnd - segStart) / totalMs) * 100;
+    const reason = state.reasonCodes.find(r => r.reason_code_id === d.reason_code_id);
+    const cls = downtimeColorClass(reason?.label, d.type);
+    seenClasses[cls] = true;
+    segments += `<div class="timeline-segment ${cls}" style="left:${leftPct}%;width:${widthPct}%;"></div>`;
+  });
+
+  if (now.getTime() < scaleEnd.getTime()) {
+    const futureStart = Math.max(now.getTime(), scaleStart.getTime());
+    const leftPct = ((futureStart - scaleStart.getTime()) / totalMs) * 100;
+    const widthPct = ((scaleEnd.getTime() - futureStart) / totalMs) * 100;
+    segments += `<div class="timeline-segment future" style="left:${leftPct}%;width:${widthPct}%;"></div>`;
+  }
+
+  const staleMs = Math.min(now.getTime(), scaleEnd.getTime()) - latestTs.getTime();
+  if (staleMs > 10 * 60000) {
+    const leftPct = ((latestTs.getTime() - scaleStart.getTime()) / totalMs) * 100;
+    const widthPct = (staleMs / totalMs) * 100;
+    segments += `<div class="timeline-segment stale" style="left:${Math.max(0, leftPct)}%;width:${widthPct}%;"></div>`;
+  }
+
+  let html = `<div class="timeline-track">${segments}</div>`;
+  const labels = {
+    cip: ["CIP", "#4DA3FF"], changeover: ["Changeover", "#B388FF"], labelchange: ["Label Change", "#FF6FA5"],
+    planned: ["Planned", "var(--amber)"], unplanned: ["Unplanned", "var(--red)"],
+  };
+  const keys = Object.keys(seenClasses);
+  if (keys.length > 0) {
+    html += '<div class="legend-row">';
+    keys.forEach(k => {
+      if (!labels[k]) return;
+      html += `<div class="legend-item"><span class="dot-sm" style="background:${labels[k][1]};"></span>${labels[k][0]}</div>`;
+    });
+    html += "</div>";
+  } else {
+    html += '<div class="readout-empty" style="margin-top:4px;">No downtime logged yet today.</div>';
+  }
+  return html;
 }
 
 function renderSummary(el, shift, run, product, events, downtime) {
