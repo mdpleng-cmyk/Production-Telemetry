@@ -668,26 +668,50 @@ function buildTimelineBar(scaleStart, scaleEnd, downtimeRows, latestTs, now) {
   return html;
 }
 
-function interpolateCounterAt(events, targetMs) {
-  let before = null, after = null;
-  events.forEach(e => {
-    const ts = new Date(e.event_ts).getTime();
-    if (ts <= targetMs) before = e;
-    if (ts >= targetMs && after === null) after = e;
+// Run-aware: distributes each run's already-correct interval_output
+// proportionally across whichever hour(s) it overlaps, by time fraction.
+// Never touches raw production_counter directly, so a counter reset
+// between runs can't produce a bogus negative/huge figure the way
+// interpolating raw counter values across a reset boundary did.
+function buildHourlyOutput(rawEvents, dayStart, dayEnd) {
+  const enriched = enrichEvents(rawEvents);
+  const lastByRun = {};
+  const hourOutput = new Array(24).fill(null);
+  const hourHasData = new Array(24).fill(false);
+
+  enriched.forEach(e => {
+    const prev = lastByRun[e.run_id] || null;
+    lastByRun[e.run_id] = e;
+    if (!prev || typeof e.interval_output !== "number") return;
+
+    const segStart = new Date(prev.event_ts).getTime();
+    const segEnd = new Date(e.event_ts).getTime();
+    const totalMs = segEnd - segStart;
+    if (totalMs <= 0) return;
+
+    for (let h = 0; h < 24; h++) {
+      const hs = dayStart.getTime() + h * 3600000;
+      const he = hs + 3600000;
+      const overlapStart = Math.max(segStart, hs, dayStart.getTime());
+      const overlapEnd = Math.min(segEnd, he, dayEnd.getTime());
+      if (overlapEnd > overlapStart) {
+        const frac = (overlapEnd - overlapStart) / totalMs;
+        hourOutput[h] = (hourOutput[h] || 0) + e.interval_output * frac;
+        hourHasData[h] = true;
+      }
+    }
   });
-  if (!before || !after) return null;
-  const bt = new Date(before.event_ts).getTime(), at = new Date(after.event_ts).getTime();
-  if (bt === at) return before.production_counter;
-  const frac = (targetMs - bt) / (at - bt);
-  return before.production_counter + frac * (after.production_counter - before.production_counter);
+
+  return { hourOutput, hourHasData };
 }
 
 async function refreshHourlyBreakdown() {
   const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
+  const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60000);
   const lookbackStart = new Date(dayStart.getTime() - 24 * 60 * 60000);
   const now = new Date();
 
-  const { data: events } = await sb.from("events").select("event_ts,production_counter")
+  const { data: events } = await sb.from("events").select("event_ts,production_counter,run_id")
     .eq("line_id", state.currentLine).gte("event_ts", lookbackStart.toISOString())
     .order("event_ts", { ascending: true });
 
@@ -695,15 +719,15 @@ async function refreshHourlyBreakdown() {
     .lt("start_ts", new Date(dayStart.getTime() + 24 * 60 * 60000).toISOString())
     .or(`end_ts.is.null,end_ts.gte.${dayStart.toISOString()}`);
 
+  const { hourOutput, hourHasData } = buildHourlyOutput(events || [], dayStart, dayEnd);
+
   const rows = [];
   for (let h = 0; h < 24; h++) {
     const hs = new Date(dayStart.getTime() + h * 60 * 60000);
     if (hs > now) break; // don't render hours that haven't started yet
     const he = new Date(hs.getTime() + 60 * 60000);
 
-    const sc = interpolateCounterAt(events || [], hs.getTime());
-    const ec = interpolateCounterAt(events || [], Math.min(he.getTime(), now.getTime()));
-    const output = (sc !== null && ec !== null) ? Math.round(ec - sc) : null;
+    const output = hourHasData[h] ? Math.round(hourOutput[h]) : null;
 
     const downtimeParts = [];
     (downtime || []).forEach(d => {
