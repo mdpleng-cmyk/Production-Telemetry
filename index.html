@@ -146,7 +146,7 @@
     <!-- Today's total, across all shifts. -->
     <div id="today-total-panel" class="panel">
       <div class="hero-block" style="margin-bottom:0;">
-        <div class="hero-label">Today's Total (all shifts)</div>
+        <div class="hero-label">Today's Total (since 6:00 AM)</div>
         <span class="hero-number" id="today-total-value" style="font-size:32px;">—</span><span class="hero-unit">bottles</span>
       </div>
     </div>
@@ -615,7 +615,7 @@ function downtimeColorClass(reasonLabel, type) {
 }
 
 async function refreshTodayOverview() {
-  const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
+  const dayStart = operationalDayStart(new Date());
   const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60000);
   const now = new Date();
 
