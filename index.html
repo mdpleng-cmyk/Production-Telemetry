@@ -580,9 +580,24 @@ async function refreshEntryView() {
   await refreshHourlyBreakdown();
 }
 
+// "Today" = operational day, starting at the most recent 6:00 AM IST
+// block boundary, not calendar midnight. Matches the plant's 6/14/22
+// shift structure — midnight falls in the middle of the 22:00 shift, so
+// using it as the day cutoff was splitting a single shift's output
+// across two "days".
+function operationalDayStart(now) {
+  const IST_OFFSET_MIN = 330; // +05:30
+  const istNow = new Date(now.getTime() + IST_OFFSET_MIN * 60000);
+  const istHour = istNow.getUTCHours();
+  const istDateOnly = new Date(Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth(), istNow.getUTCDate()));
+  if (istHour < 6) istDateOnly.setUTCDate(istDateOnly.getUTCDate() - 1);
+  const istSixAM = new Date(istDateOnly.getTime() + 6 * 3600000);
+  return new Date(istSixAM.getTime() - IST_OFFSET_MIN * 60000); // back to real UTC instant
+}
+
 async function refreshTodayTotal() {
-  const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
-  const lookbackStart = new Date(dayStart.getTime() - 24 * 60 * 60000); // extra day of context so the first reading after midnight has a `prev` to diff against
+  const dayStart = operationalDayStart(new Date());
+  const lookbackStart = new Date(dayStart.getTime() - 24 * 60 * 60000); // extra day of context so the first reading after the boundary has a `prev` to diff against
   const { data: rawEvents } = await sb.from("events").select("*").eq("line_id", state.currentLine)
     .gte("event_ts", lookbackStart.toISOString()).order("event_ts", { ascending: true });
   const events = enrichEvents(rawEvents || []);
