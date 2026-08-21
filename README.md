@@ -73,11 +73,16 @@
  *       Operator-driven changeover. Closes the open run, opens a new one
  *       on the same shift with the new sku_id.
  *   insert_backdated_reading(p_line_id, p_event_ts, p_counter, p_notes)
- *       Control-room only. Looks up the shift/run covering p_event_ts
- *       (not "now") and writes a raw READING event into it. Skips reset
+ *       Control-room only. Resolves the shift/run covering p_event_ts
+ *       (not "now"), creating them if the block was never touched live —
+ *       using the same 6/14/22 boundaries as the live rolling logic.
+ *       Refuses if that would overlap an existing shift. Skips reset
  *       detection and downtime auto-inference — both assume the reading
- *       just happened. Raises if no shift/run covers that timestamp,
- *       rather than creating one.
+ *       just happened.
+ *   delete_reading(p_event_id)
+ *       Control-room only. Hard-deletes a reading. No undo. The event
+ *       that followed it recalculates its own interval against the new
+ *       prior event automatically on next load.
  *
  * HELPER FUNCTIONS (not called from the frontend)
  *   is_control_room()          - RLS helper, checks operators.role
@@ -153,17 +158,25 @@
  * 6. BACKDATED READINGS use a separate RPC (insert_backdated_reading),
  *    not log_reading with an optional timestamp param. Reason: log_reading's
  *    shift/run resolution, reset detection, and downtime inference all
- *    implicitly assume "this reading just happened" (resolve against now(),
- *    diff against the last-written row). Backdating needs shift/run
+ *    implicitly assume "this reading just happened" (resolve against
+ *    now(), diff against the last-written row). Backdating needs shift/run
  *    *lookup* against an arbitrary past timestamp instead, and must skip
- *    reset/downtime auto-detection entirely — those don't make sense for
- *    a reading inserted after the fact. Control-room role only. Fails loud
- *    (raises) if no shift/run covers the given timestamp rather than
- *    creating one — deliberately no auto-create-shift-in-the-past path, to
- *    avoid retroactively altering shift boundaries. Inserted rows still
- *    flow through the same RECOMPUTE, NEVER FREEZE model — enrichEvents()
- *    naturally slots them in by event_ts and recalculates neighboring
- *    intervals, no separate backfill logic needed.
+ *    reset/downtime auto-detection entirely — neither makes sense for a
+ *    reading inserted after the fact. Control-room role only.
+ *    If no shift/run covers the given timestamp, one is created using the
+ *    same 6/14/22 block boundaries as the live rolling logic
+ *    (current_block_start()) — this handles a block that nobody logged a
+ *    reading in at the time. Refuses (raises) rather than creating one if
+ *    doing so would overlap an existing shift, so it can't be used to
+ *    reshape real shift history. Inserted rows still flow through the
+ *    RECOMPUTE, NEVER FREEZE model — enrichEvents() slots them in by
+ *    event_ts and recalculates neighboring intervals automatically.
+ *
+ * 7. DELETING A READING (delete_reading RPC) is a hard delete, control-room
+ *    only. No soft-delete/undo — the recompute-on-read model means the
+ *    event that followed the deleted one will automatically pick up the
+ *    correct prior event and recalculate its interval on next load, so no
+ *    separate fixup step is needed after a delete.
  *
  * DROPPED FROM ORIGINAL (deliberate, not oversights)
  * -----------------------------------------------------------
@@ -250,34 +263,4 @@
  * old ShiftLog rows have no line_id/sku_id/shift_id/run_id to attach to,
  * same limitation the original module map already noted for its own
  * predecessor.
- *
- * MAINTAINING THIS FILE
- * -----------------------------------------------------------
- * This file is the repo's README on GitHub — it's the first thing anyone
- * (human or AI) sees when they open the project, and it should be enough
- * on its own to understand the system without digging through commit
- * history or old chat threads.
- *
- * If you are an AI asked to make a change here:
- *   1. Read this whole file before touching any code — it front-loads the
- *      "why" behind decisions that aren't obvious from the code alone
- *      (e.g. why writes go through RPCs instead of direct inserts, why
- *      interval math is computed twice instead of shared).
- *   2. Prefer find-and-replace / targeted diffs over rewriting whole
- *      files. telemetry_index.html and telemetry_schema.sql are meant to
- *      be edited incrementally, not regenerated — a full rewrite risks
- *      silently dropping something (a policy, an edge case, a comment
- *      explaining a gotcha) that isn't obvious is load-bearing.
- *   3. After making a change, update this file in the same pass:
- *        - New table/column/RPC → add it under DATABASE OBJECTS.
- *        - New architecture decision or non-obvious trade-off → add a
- *          numbered entry under ARCHITECTURE DECISIONS AND WHY.
- *        - Shipped something that was listed under DELIBERATELY NOT BUILT
- *          YET → remove it from that list.
- *        - Hit a bug caused by a library/API quirk (like the make_interval
- *          type mismatch) → add it under KNOWN GOTCHAS, even after fixing
- *          it, so the next person doesn't rediscover it the hard way.
- *   4. Don't leave this file stale. A module map that doesn't match the
- *      code is worse than no module map — it actively misleads whoever
- *      reads it next.
  */
