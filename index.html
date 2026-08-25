@@ -126,14 +126,14 @@
          so repeating it here would just be noise. Sentence-style rather
          than a big standalone hero-number, and lower padding, so it reads
          as a small personal note rather than competing with the actual
-         production metrics below it. #operator-achievements is an empty
-         anchor for the badge/gamification work planned later. -->
+         production metrics below it. #operator-achievements holds the
+         milestone badge + logging streak (see renderAchievements()). -->
     <div class="panel" id="operator-stats-panel" style="padding:10px 16px;">
       <span class="eyebrow" id="operator-stats-name">Your Achievement</span>
       <div style="margin-top:6px; font-family:'Inter',sans-serif; font-size:14px; color:var(--text);">
         You've contributed to packing <span id="op-stat-alltime" style="font-family:'JetBrains Mono',monospace; font-weight:700; color:var(--green);">—</span> bottles
       </div>
-      <div id="operator-achievements"></div>
+      <div id="operator-achievements" style="margin-top:8px;"></div>
     </div>
 
     <!-- Compact line/product bar — line selector only shows if there's more than one line. -->
@@ -634,17 +634,60 @@ async function refreshTodayTotal() {
 // (get_operator_stats RPC) rather than pulled-and-summed client-side like
 // Today's Total, since the all-time window means scanning the full events
 // table — cheap for Postgres to do once, expensive to ship to the client
-// and redo in JS. This is also the anchor point for the planned
-// achievements/gamification work: badge thresholds will read off this
-// same total.
+// and redo in JS.
+//
+// MILESTONE BADGES — thresholds on the same total_output already fetched
+// here, so no extra query. Deliberately shows only the highest earned
+// milestone plus the gap to the next one, not every badge ever earned —
+// a growing wall of past badges is clutter, not achievement.
+//
+// STREAK — a separate RPC (get_operator_streak) because it needs its own
+// scan of this operator's events grouped by operational day, which
+// get_operator_stats' interval-based aggregation can't produce as a
+// byproduct. Deliberately counts "days you logged at least one reading"
+// rather than "days you didn't miss an hourly reading" — the latter
+// rewards raw diligence in a way that's easy to game (log a junk reading
+// just to keep the streak) and hard to defend against readings genuinely
+// skipped because nothing happened. Showing up is the honest signal.
+const MILESTONES = [1000, 5000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000];
+function milestoneLabel(n) {
+  return n >= 1000000 ? (n / 1000000) + "M" : (n / 1000) + "K";
+}
+function renderAchievements(totalOutput, streak) {
+  const el = document.getElementById("operator-achievements");
+  const earned = MILESTONES.filter(m => totalOutput >= m);
+  const next = MILESTONES.find(m => totalOutput < m);
+  let html = "";
+  if (earned.length > 0) {
+    const highest = earned[earned.length - 1];
+    html += `<div style="display:flex; align-items:center; gap:6px; font-size:12px; color:var(--amber);">
+      <span>🏅</span><span style="font-family:'Oswald',sans-serif; letter-spacing:.04em; text-transform:uppercase;">${milestoneLabel(highest)} milestone</span></div>`;
+  }
+  if (next) {
+    const remaining = Math.max(0, Math.round(next - totalOutput));
+    html += `<div style="font-size:11px; color:var(--text-muted); margin-top:2px;">${remaining.toLocaleString()} to go for ${milestoneLabel(next)}</div>`;
+  }
+  if (streak && streak.current_streak_days > 0) {
+    html += `<div style="display:flex; align-items:center; gap:6px; font-size:12px; color:var(--green); margin-top:6px;">
+      <span>🔥</span><span>${streak.current_streak_days}-day logging streak</span></div>`;
+  }
+  el.innerHTML = html;
+}
+
 async function refreshOperatorStats() {
   if (!state.operator) return;
-  const { data, error } = await sb.rpc("get_operator_stats", { p_operator_id: state.operator.id, p_since: null });
-  if (error) {
-    console.error("get_operator_stats failed:", error);
+  const [statsRes, streakRes] = await Promise.all([
+    sb.rpc("get_operator_stats", { p_operator_id: state.operator.id, p_since: null }),
+    sb.rpc("get_operator_streak", { p_operator_id: state.operator.id }),
+  ]);
+  if (statsRes.error) {
+    console.error("get_operator_stats failed:", statsRes.error);
     return; // leave the "—" placeholder rather than blocking entry with a toast
   }
-  document.getElementById("op-stat-alltime").textContent = Math.round(data?.total_output ?? 0).toLocaleString();
+  const totalOutput = statsRes.data?.total_output ?? 0;
+  document.getElementById("op-stat-alltime").textContent = Math.round(totalOutput).toLocaleString();
+  if (streakRes.error) console.error("get_operator_streak failed:", streakRes.error); // badges still render without it
+  renderAchievements(totalOutput, streakRes.data || null);
 }
 
 function downtimeColorClass(reasonLabel, type) {
