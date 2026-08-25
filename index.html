@@ -118,6 +118,29 @@
   <!-- ---------- OPERATOR ENTRY ---------- -->
   <main id="entry-view" class="wrap">
 
+    <!-- Operator stats — personal totals, first thing above the fold.
+         Deliberately a separate panel/RPC pair (get_operator_stats) from
+         Today's Total below: that one is per-LINE (whoever is on shift),
+         this one is per-OPERATOR (whoever recorded the reading), so the
+         two numbers will legitimately differ when more than one operator
+         works a line. #operator-achievements is an empty anchor for the
+         badge/gamification work planned later — leave it in the DOM even
+         while unused so that addition doesn't need a layout change. -->
+    <div class="panel" id="operator-stats-panel">
+      <span class="eyebrow" id="operator-stats-name">Your Stats</span>
+      <div style="display:flex; gap:28px; margin-top:8px; flex-wrap:wrap;">
+        <div>
+          <div class="hero-label">Today</div>
+          <span class="hero-number" style="font-size:28px;" id="op-stat-today">—</span><span class="hero-unit">bottles</span>
+        </div>
+        <div>
+          <div class="hero-label">All-Time</div>
+          <span class="hero-number" style="font-size:28px;" id="op-stat-alltime">—</span><span class="hero-unit">bottles</span>
+        </div>
+      </div>
+      <div id="operator-achievements"></div>
+    </div>
+
     <!-- Compact line/product bar — line selector only shows if there's more than one line. -->
     <div id="line-product-bar" style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; font-size:12px; color:var(--text-muted);">
       <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
@@ -416,6 +439,7 @@ async function showMainApp() {
   document.getElementById("main-app").classList.remove("hidden");
   document.getElementById("header-name").textContent = state.operator.name;
   document.getElementById("header-role").textContent = state.operator.role === "control_room" ? "Control Room" : "Operator";
+  document.getElementById("operator-stats-name").textContent = state.operator.name + "'s Stats";
   if (state.operator.role === "control_room") {
     document.getElementById("dashboard-tab-btn").classList.remove("hidden");
     const bdBtn = document.createElement("button");
@@ -578,6 +602,7 @@ async function refreshEntryView() {
   await refreshTodayTotal();
   await refreshTodayOverview();
   await refreshHourlyBreakdown();
+  await refreshOperatorStats();
 }
 
 // "Today" = operational day, starting at the most recent 6:00 AM IST
@@ -605,6 +630,33 @@ async function refreshTodayTotal() {
     .filter(e => new Date(e.event_ts) >= dayStart)
     .reduce((s, e) => s + (typeof e.interval_output === "number" ? e.interval_output : 0), 0);
   document.getElementById("today-total-value").textContent = total.toLocaleString();
+}
+
+// Personal totals — scoped to whichever operator recorded the reading
+// (events.recorded_by), not to a line or shift. Intentionally line-
+// independent: an operator's lifetime/today total should count their
+// readings across every line they've worked, not just the one currently
+// selected on this device. Server-side (get_operator_stats RPC) rather
+// than pulled-and-summed client-side like Today's Total, since the
+// all-time window means scanning the full events table — cheap for
+// Postgres to do once, expensive to ship to the client and redo in JS.
+// This is also the anchor point for the planned achievements/gamification
+// work: badge thresholds will read off these same totals.
+async function refreshOperatorStats() {
+  if (!state.operator) return;
+  const dayStart = operationalDayStart(new Date());
+  const [todayRes, allTimeRes] = await Promise.all([
+    sb.rpc("get_operator_stats", { p_operator_id: state.operator.id, p_since: dayStart.toISOString() }),
+    sb.rpc("get_operator_stats", { p_operator_id: state.operator.id, p_since: null }),
+  ]);
+  if (todayRes.error || allTimeRes.error) {
+    console.error("get_operator_stats failed:", todayRes.error || allTimeRes.error);
+    return; // leave the "—" placeholders rather than blocking entry with a toast
+  }
+  const todayTotal = todayRes.data?.total_output ?? 0;
+  const allTimeTotal = allTimeRes.data?.total_output ?? 0;
+  document.getElementById("op-stat-today").textContent = Math.round(todayTotal).toLocaleString();
+  document.getElementById("op-stat-alltime").textContent = Math.round(allTimeTotal).toLocaleString();
 }
 
 function downtimeColorClass(reasonLabel, type) {
