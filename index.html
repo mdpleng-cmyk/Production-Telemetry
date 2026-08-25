@@ -121,15 +121,17 @@
     <!-- Operator stats — personal achievement number, deliberately NOT
          styled like the amber production hero-numbers elsewhere (Today's
          Total, shift Output) so it can't be misread as a production
-         figure. Green, framed as "packed by you", all-time only — Today's
-         Total below already covers the line-level daily number, so
-         repeating it here would just be noise. #operator-achievements is
-         an empty anchor for the badge/gamification work planned later. -->
-    <div class="panel" id="operator-stats-panel">
+         figure. Green, framed as "contributed to", all-time only —
+         Today's Total below already covers the line-level daily number,
+         so repeating it here would just be noise. Sentence-style rather
+         than a big standalone hero-number, and lower padding, so it reads
+         as a small personal note rather than competing with the actual
+         production metrics below it. #operator-achievements is an empty
+         anchor for the badge/gamification work planned later. -->
+    <div class="panel" id="operator-stats-panel" style="padding:10px 16px;">
       <span class="eyebrow" id="operator-stats-name">Your Achievement</span>
-      <div style="margin-top:8px;">
-        <div class="hero-label">Bottles Packed By You</div>
-        <span class="hero-number" style="font-size:30px; color:var(--green); text-shadow:none;" id="op-stat-alltime">—</span><span class="hero-unit">all-time, across every line</span>
+      <div style="margin-top:6px; font-family:'Inter',sans-serif; font-size:14px; color:var(--text);">
+        You've contributed to packing <span id="op-stat-alltime" style="font-family:'JetBrains Mono',monospace; font-weight:700; color:var(--green);">—</span> bottles
       </div>
       <div id="operator-achievements"></div>
     </div>
