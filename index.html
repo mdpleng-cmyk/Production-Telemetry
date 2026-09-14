@@ -276,6 +276,25 @@
   </div>
 </div>
 
+<div id="retro-downtime-modal" class="modal-overlay">
+  <div class="modal-box">
+    <div class="eyebrow">Add Retro Downtime</div>
+    <label>Started</label>
+    <input id="retro-dt-start" type="datetime-local" style="width:100%;margin-bottom:10px;" />
+    <label>Ended</label>
+    <input id="retro-dt-end" type="datetime-local" style="width:100%;margin-bottom:10px;" />
+    <label>Type</label>
+    <select id="retro-dt-type" style="width:100%; margin-bottom:10px;"><option>Unplanned</option><option>Planned</option></select>
+    <label>Reason</label>
+    <select id="retro-dt-reason" style="width:100%; margin-bottom:10px;"></select>
+    <input id="retro-dt-reason-text" type="text" placeholder="Additional detail (optional)" style="width:100%;margin-bottom:12px;font-family:'Inter',sans-serif;" />
+    <div style="display:flex;gap:8px;">
+      <button id="retro-dt-submit-btn" class="primary" style="flex:1;">Add Downtime</button>
+      <button id="retro-dt-cancel-btn" style="flex:1;">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast-container" style="position:fixed; bottom:20px; left:0; right:0; display:flex; flex-direction:column; align-items:center; gap:8px; z-index:200; pointer-events:none;"></div>
 
 <script>
@@ -317,6 +336,10 @@ function fmtElapsed(fromMs, toMs) {
   const totalMin = Math.max(0, Math.floor((toMs - fromMs) / 60000));
   const h = Math.floor(totalMin / 60), m = totalMin % 60;
   return h === 0 ? `${m} min` : `${h} hr ${m} min`;
+}
+function datetimeLocalValue(date) {
+  const pad = value => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 // ============================================================
@@ -437,10 +460,20 @@ async function showMainApp() {
     bdBtn.textContent = "Add Backdated Reading";
     bdBtn.style.cssText = "width:100%; margin-bottom:16px;";
     bdBtn.onclick = () => {
-      document.getElementById("bd-datetime").value = new Date().toISOString().slice(0, 16);
+      document.getElementById("bd-datetime").value = datetimeLocalValue(new Date());
       document.getElementById("backdate-modal").classList.add("open");
     };
     document.getElementById("new-shift-btn").after(bdBtn);
+    const retroBtn = document.createElement("button");
+    retroBtn.textContent = "Add Retro Downtime";
+    retroBtn.style.cssText = "width:100%; margin-bottom:16px;";
+    retroBtn.onclick = () => {
+      const end = new Date();
+      document.getElementById("retro-dt-start").value = datetimeLocalValue(new Date(end.getTime() - 60 * 60000));
+      document.getElementById("retro-dt-end").value = datetimeLocalValue(end);
+      document.getElementById("retro-downtime-modal").classList.add("open");
+    };
+    document.getElementById("new-shift-btn").after(retroBtn);
   }
 
   await Promise.all([loadLines(), loadProducts(), loadReasonCodes()]);
@@ -499,9 +532,14 @@ async function loadReasonCodes() {
   const { data } = await sb.from("reason_codes").select("*").eq("active", true).order("label");
   state.reasonCodes = data || [];
   document.getElementById("dt-reason").innerHTML = state.reasonCodes.map(r => `<option value="${r.reason_code_id}">${r.label}</option>`).join("");
+  document.getElementById("retro-dt-reason").innerHTML = state.reasonCodes.map(r => `<option value="${r.reason_code_id}">${r.label}</option>`).join("");
   document.getElementById("dt-reason").onchange = (e) => {
     const match = state.reasonCodes.find(r => r.reason_code_id === e.target.value);
     if (match) document.getElementById("dt-type").value = match.default_type;
+  };
+  document.getElementById("retro-dt-reason").onchange = (e) => {
+    const match = state.reasonCodes.find(r => r.reason_code_id === e.target.value);
+    if (match) document.getElementById("retro-dt-type").value = match.default_type;
   };
 }
 
@@ -546,11 +584,10 @@ function computeInterval(prev, cur) {
   return r;
 }
 function enrichEvents(events) {
-  const lastByRun = {};
+  let previousEvent = null;
   return events.map(e => {
-    const prev = lastByRun[e.run_id] || null;
-    const calc = computeInterval(prev, e);
-    lastByRun[e.run_id] = e;
+    const calc = computeInterval(previousEvent, e);
+    previousEvent = e;
     return Object.assign({}, e, { interval_output: calc.intervalOutput, avg_bpm: calc.bpm, interval_duration_min: calc.intervalDuration });
   });
 }
@@ -572,7 +609,10 @@ async function refreshEntryView() {
   if (!state.currentLine) return;
 
   const { data: openShift } = await sb.from("shifts").select("*").eq("line_id", state.currentLine).eq("status", "OPEN").order("started_at", { ascending: false }).limit(1).maybeSingle();
-  const { data: openRun } = await sb.from("runs").select("*").eq("line_id", state.currentLine).eq("status", "OPEN").order("started_at", { ascending: false }).limit(1).maybeSingle();
+  // A shift change can close the run row while the line continues producing;
+  // the latest run still identifies the product and its rated speed.
+  const { data: openRun } = await sb.from("runs").select("*").eq("line_id", state.currentLine)
+    .order("started_at", { ascending: false }).limit(1).maybeSingle();
 
   const product = state.products.find(p => p.sku_id === openRun?.sku_id);
   document.getElementById("entry-product-label").textContent = "Product: " + (product?.sku_name || "—");
@@ -582,9 +622,14 @@ async function refreshEntryView() {
     summaryEl.innerHTML = '<div class="eyebrow">No shift open yet — take a reading to start one.</div>';
     document.getElementById("shift-log-table").innerHTML = "";
   } else {
-    const { data: rawEvents } = await sb.from("events").select("*").eq("shift_id", openShift.shift_id).order("event_ts", { ascending: true });
-    const events = enrichEvents(rawEvents || []);
-    const { data: downtime } = await sb.from("downtime_log").select("*").eq("shift_id", openShift.shift_id);
+    const shiftStart = new Date(openShift.started_at);
+    const lookbackStart = new Date(shiftStart.getTime() - 24 * 60 * 60000);
+    const { data: rawEvents } = await sb.from("events").select("*").eq("line_id", state.currentLine)
+      .gte("event_ts", lookbackStart.toISOString()).order("event_ts", { ascending: true });
+    const enriched = enrichEvents(rawEvents || []);
+    const events = enriched.filter(e => new Date(e.event_ts) >= shiftStart);
+    const { data: downtime } = await sb.from("downtime_log").select("*").eq("line_id", state.currentLine)
+      .gte("start_ts", shiftStart.toISOString());
 
     renderSummary(summaryEl, openShift, openRun, product, events, downtime || []);
     renderShiftLogTable(events, downtime || []);
@@ -700,7 +745,8 @@ async function refreshTodayOverview() {
   const now = new Date();
 
   const { data: downtime } = await sb.from("downtime_log").select("*").eq("line_id", state.currentLine)
-    .gte("start_ts", dayStart.toISOString()).lte("start_ts", dayEnd.toISOString());
+    .lt("start_ts", dayEnd.toISOString())
+    .or(`end_ts.is.null,end_ts.gte.${dayStart.toISOString()}`);
   const { data: rawEvents } = await sb.from("events").select("*").eq("line_id", state.currentLine)
     .gte("event_ts", lookbackStart.toISOString()).order("event_ts", { ascending: true });
   const { data: lastEvent } = await sb.from("events").select("event_ts").eq("line_id", state.currentLine)
@@ -740,8 +786,9 @@ function buildTimelineBar(scaleStart, scaleEnd, downtimeRows, latestTs, now) {
   const seenClasses = {};
 
   downtimeRows.forEach(d => {
-    if (!d.start_ts || !d.end_ts) return;
-    const dStart = new Date(d.start_ts).getTime(), dEnd = new Date(d.end_ts).getTime();
+    if (!d.start_ts) return;
+    const dStart = new Date(d.start_ts).getTime();
+    const dEnd = d.end_ts ? new Date(d.end_ts).getTime() : Math.min(now.getTime(), scaleEnd.getTime());
     const segStart = Math.max(dStart, scaleStart.getTime());
     const segEnd = Math.min(dEnd, scaleEnd.getTime());
     if (segEnd <= segStart) return;
@@ -789,37 +836,67 @@ function buildTimelineBar(scaleStart, scaleEnd, downtimeRows, latestTs, now) {
 function buildBpmTrendSvg(scaleStart, scaleEnd, rawEvents, rated) {
   const downtimeRanges = (state.currentTrendDowntime || [])
     .map(d => {
-      if (!d.start_ts || !d.end_ts) return null;
+      if (!d.start_ts) return null;
       const start = new Date(d.start_ts).getTime();
-      const end = new Date(d.end_ts).getTime();
+      const end = d.end_ts ? new Date(d.end_ts).getTime() : Math.min(Date.now(), scaleEnd.getTime());
       if (!(end > start)) return null;
-      return { start, end };
+      return { start, end, type: d.type, reasonCodeId: d.reason_code_id };
     })
     .filter(Boolean);
+  const plannedDowntimeRanges = downtimeRanges.filter(range => range.type === "Planned");
 
   const enriched = enrichEvents(rawEvents || []);
   const dayEvents = enriched.filter(e => {
     const ts = new Date(e.event_ts).getTime();
     return ts >= scaleStart.getTime() && ts <= scaleEnd.getTime();
   });
+  const readingMarkers = dayEvents
+    .filter(e => typeof e.avg_bpm !== "number")
+    .map(e => new Date(e.event_ts).getTime());
 
   if (dayEvents.length === 0) {
     return '<div class="readout-empty" style="margin-top:8px;">No BPM trend yet today.</div>';
   }
 
-  const windowMs = BPM_TREND_WINDOW_MIN * 60 * 1000;
-  const rolling = [];
-  const points = [];
+  const validEvents = dayEvents
+    .filter(e => typeof e.avg_bpm === "number" && Number.isFinite(e.avg_bpm))
+    .map(e => {
+      const ts = new Date(e.event_ts).getTime();
+      const elapsedMs = Math.max(1, (e.interval_duration_min || 0) * 60000);
+      const intervalStart = ts - elapsedMs;
+      const plannedDowntimeMs = plannedDowntimeRanges.reduce((total, range) => {
+        const overlapStart = Math.max(intervalStart, range.start);
+        const overlapEnd = Math.min(ts, range.end);
+        return total + Math.max(0, overlapEnd - overlapStart);
+      }, 0);
+      const activeMs = Math.max(1, elapsedMs - plannedDowntimeMs);
+      const bpm = typeof e.interval_output === "number"
+        ? e.interval_output / (activeMs / 60000)
+        : e.avg_bpm;
+      return { ts, bpm, activeMs };
+    });
+  const smoothWindow = 3;
+  const points = validEvents.map((event, index) => {
+    let start = Math.max(0, index - smoothWindow + 1);
+    for (let i = index; i > start; i--) {
+      const previousTs = validEvents[i - 1].ts;
+      if (downtimeRanges.some(range => range.start < event.ts && range.end > previousTs)) {
+        start = i;
+        break;
+      }
+    }
 
-  dayEvents.forEach(e => {
-    const ts = new Date(e.event_ts).getTime();
-    const bpm = typeof e.avg_bpm === "number" ? e.avg_bpm : null;
-    if (bpm === null) return;
+    const window = validEvents.slice(start, index + 1);
+    const totalDuration = window.reduce((sum, item, itemIndex) => {
+      if (itemIndex === 0) return sum;
+      return sum + item.activeMs;
+    }, 0);
+    const weightedBpm = window.reduce((sum, item, itemIndex) => {
+      const duration = item.activeMs;
+      return sum + item.bpm * duration;
+    }, 0);
 
-    while (rolling.length > 0 && ts - rolling[0].ts > windowMs) rolling.shift();
-    rolling.push({ ts, bpm });
-    const avg = rolling.reduce((sum, item) => sum + item.bpm, 0) / rolling.length;
-    points.push({ ts, bpm: avg });
+    return { ts: event.ts, bpm: totalDuration > 0 ? weightedBpm / totalDuration : event.bpm };
   });
 
   if (points.length === 0) {
@@ -845,21 +922,29 @@ function buildBpmTrendSvg(scaleStart, scaleEnd, rawEvents, rated) {
   };
 
   const segments = [];
-  let current = [];
+  let currentSegment = [];
   points.forEach((point, index) => {
     if (index > 0) {
-      const prev = points[index - 1];
-      const prevTs = prev.ts;
-      const currTs = point.ts;
-      const crossesDowntime = downtimeRanges.some(range => Math.max(prevTs, currTs) > range.start && Math.min(prevTs, currTs) < range.end);
-      if (crossesDowntime) {
-        if (current.length > 1) segments.push(current);
-        current = [];
+      const previous = points[index - 1];
+      const crossesPlannedDowntime = plannedDowntimeRanges.some(range =>
+        Math.max(previous.ts, point.ts) > range.start && Math.min(previous.ts, point.ts) < range.end
+      );
+      if (crossesPlannedDowntime) {
+        if (currentSegment.length > 0) segments.push(currentSegment);
+        const plannedRange = plannedDowntimeRanges.find(range =>
+          Math.max(previous.ts, point.ts) > range.start && Math.min(previous.ts, point.ts) < range.end
+        );
+        // Start the post-CIP line at the stop end using the next measured BPM.
+        // This infers running performance after the planned stop without drawing
+        // production through the planned downtime itself.
+        currentSegment = plannedRange && plannedRange.end < point.ts
+          ? [{ ts: plannedRange.end, bpm: point.bpm }]
+          : [];
       }
     }
-    current.push(point);
+    currentSegment.push(point);
   });
-  if (current.length > 1) segments.push(current);
+  if (currentSegment.length > 0) segments.push(currentSegment);
 
   const tickHours = [6, 14, 22];
   const tickTimes = tickHours.map(hour => {
@@ -876,6 +961,16 @@ function buildBpmTrendSvg(scaleStart, scaleEnd, rawEvents, rated) {
       <text x="${x}" y="14" text-anchor="middle" font-size="9" fill="var(--text-muted)" style="letter-spacing:0.08em;">SHIFT</text>`;
   }).join("");
 
+  const downtimeBands = downtimeRanges.map(range => {
+    const left = Math.max(paddingX, mapX(Math.max(range.start, scaleStart.getTime())));
+    const right = Math.min(1000 - paddingX, mapX(Math.min(range.end, scaleEnd.getTime())));
+    if (right <= left) return "";
+    const reason = state.reasonCodes.find(r => r.reason_code_id === range.reasonCodeId);
+    const cls = downtimeColorClass(reason?.label, range.type);
+    const color = { cip: "#4DA3FF", changeover: "#B388FF", labelchange: "#FF6FA5", planned: "var(--amber)", unplanned: "var(--red)" }[cls] || "var(--red)";
+    return `<rect x="${left}" y="${plotTop}" width="${right - left}" height="${innerH}" fill="${color}" opacity="0.12" clip-path="url(#bpm-trend-plot-clip)" />`;
+  }).join("");
+
   let html = `<svg viewBox="0 0 1000 120" preserveAspectRatio="none" style="display:block;width:100%;height:120px;">
     <defs><clipPath id="bpm-trend-plot-clip"><rect x="${paddingX}" y="${plotTop}" width="${innerW}" height="${innerH}" /></clipPath></defs>`;
   if (typeof rated === "number" && rated > 0) {
@@ -884,14 +979,24 @@ function buildBpmTrendSvg(scaleStart, scaleEnd, rawEvents, rated) {
   }
 
   html += shiftMarkers;
+  html += downtimeBands;
 
   html += `<g clip-path="url(#bpm-trend-plot-clip)">`;
   segments.forEach(segment => {
-    if (segment.length < 2) return;
+    if (segment.length === 1) {
+      const point = segment[0];
+      html += `<circle cx="${mapX(point.ts)}" cy="${mapY(point.bpm)}" r="3.5" fill="var(--amber)" />`;
+      return;
+    }
     const poly = segment.map(p => `${mapX(p.ts)},${mapY(p.bpm)}`).join(" ");
-    html += `<polyline fill="none" stroke="var(--amber)" stroke-width="2.25" points="${poly}" />`;
+    html += `<polyline fill="none" stroke="var(--amber)" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" points="${poly}" />`;
   });
   html += `</g>`;
+
+  readingMarkers.forEach(ts => {
+    const x = mapX(ts);
+    html += `<circle cx="${x}" cy="${plotBottom}" r="3.5" fill="var(--panel)" stroke="var(--amber)" stroke-width="1.5"><title>Reading logged; interval starts here</title></circle>`;
+  });
 
   tickTimes.forEach(ts => {
     const x = mapX(ts);
@@ -908,15 +1013,26 @@ function buildBpmTrendSvg(scaleStart, scaleEnd, rawEvents, rated) {
 // Never touches raw production_counter directly, so a counter reset
 // between runs can't produce a bogus negative/huge figure the way
 // interpolating raw counter values across a reset boundary did.
-function buildHourlyOutput(rawEvents, dayStart, dayEnd) {
+function buildHourlyOutput(rawEvents, dayStart, dayEnd, downtimeRows) {
   const enriched = enrichEvents(rawEvents);
-  const lastByRun = {};
+  let previousEvent = null;
   const hourOutput = new Array(24).fill(null);
   const hourHasData = new Array(24).fill(false);
+  const hourHasReading = new Array(24).fill(false);
+  const plannedDowntime = (downtimeRows || [])
+    .filter(d => d.type === "Planned" && d.start_ts)
+    .map(d => ({
+      start: new Date(d.start_ts).getTime(),
+      end: d.end_ts ? new Date(d.end_ts).getTime() : dayEnd.getTime(),
+    }))
+    .filter(d => d.end > d.start);
 
   enriched.forEach(e => {
-    const prev = lastByRun[e.run_id] || null;
-    lastByRun[e.run_id] = e;
+    const eventTs = new Date(e.event_ts).getTime();
+    const hourIndex = Math.floor((eventTs - dayStart.getTime()) / 3600000);
+    if (hourIndex >= 0 && hourIndex < 24) hourHasReading[hourIndex] = true;
+    const prev = previousEvent;
+    previousEvent = e;
     if (!prev || typeof e.interval_output !== "number") return;
 
     const segStart = new Date(prev.event_ts).getTime();
@@ -930,14 +1046,26 @@ function buildHourlyOutput(rawEvents, dayStart, dayEnd) {
       const overlapStart = Math.max(segStart, hs, dayStart.getTime());
       const overlapEnd = Math.min(segEnd, he, dayEnd.getTime());
       if (overlapEnd > overlapStart) {
-        const frac = (overlapEnd - overlapStart) / totalMs;
-        hourOutput[h] = (hourOutput[h] || 0) + e.interval_output * frac;
         hourHasData[h] = true;
+        const plannedMs = plannedDowntime.reduce((sum, range) => {
+          const plannedStart = Math.max(overlapStart, range.start);
+          const plannedEnd = Math.min(overlapEnd, range.end);
+          return sum + Math.max(0, plannedEnd - plannedStart);
+        }, 0);
+        // A bucket touched by planned downtime is reported as zero rather than
+        // guessing which side of the stop produced its counter movement.
+        const activeMs = plannedMs > 0 ? 0 : Math.max(0, overlapEnd - overlapStart);
+        const activeIntervalMs = Math.max(1, totalMs - plannedDowntime.reduce((sum, range) => {
+          const plannedStart = Math.max(segStart, range.start);
+          const plannedEnd = Math.min(segEnd, range.end);
+          return sum + Math.max(0, plannedEnd - plannedStart);
+        }, 0));
+        hourOutput[h] = (hourOutput[h] || 0) + e.interval_output * (activeMs / activeIntervalMs);
       }
     }
   });
 
-  return { hourOutput, hourHasData };
+  return { hourOutput, hourHasData, hourHasReading };
 }
 
 async function refreshHourlyBreakdown() {
@@ -954,7 +1082,7 @@ async function refreshHourlyBreakdown() {
     .lt("start_ts", dayEnd.toISOString())
     .or(`end_ts.is.null,end_ts.gte.${dayStart.toISOString()}`);
 
-  const { hourOutput, hourHasData } = buildHourlyOutput(events || [], dayStart, dayEnd);
+  const { hourOutput, hourHasData, hourHasReading } = buildHourlyOutput(events || [], dayStart, dayEnd, downtime || []);
 
   const rows = [];
   for (let h = 0; h < 24; h++) {
@@ -977,7 +1105,7 @@ async function refreshHourlyBreakdown() {
       }
     });
 
-    rows.push({ hs, he, output, downtimeText: downtimeParts.join(", ") });
+    rows.push({ hs, he, output, hasReading: hourHasReading[h], downtimeText: downtimeParts.join(", ") });
   }
 
   const el = document.getElementById("hourly-breakdown");
@@ -985,7 +1113,7 @@ async function refreshHourlyBreakdown() {
 
   el.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Hour</th><th>Production</th><th>Downtime</th></tr></thead><tbody>' +
     rows.slice().reverse().map(r =>
-      `<tr><td>${fmtTime(r.hs)}\u2013${fmtTime(r.he)}</td><td>${r.output !== null ? r.output.toLocaleString() : "No data"}</td><td style="font-size:11px;">${r.downtimeText || "\u2014"}</td></tr>`
+      `<tr><td>${fmtTime(r.hs)}\u2013${fmtTime(r.he)}</td><td>${r.output !== null ? r.output.toLocaleString() : (r.hasReading ? "Reading logged" : "No data")}</td><td style="font-size:11px;">${r.downtimeText || "\u2014"}</td></tr>`
     ).join("") + "</tbody></table></div>";
 }
 
@@ -1123,6 +1251,32 @@ document.getElementById("bd-submit-btn").onclick = async () => {
   document.getElementById("backdate-modal").classList.remove("open");
   document.getElementById("bd-counter").value = "";
   document.getElementById("bd-notes").value = "";
+  await refreshEntryView();
+};
+document.getElementById("retro-dt-cancel-btn").onclick = () => document.getElementById("retro-downtime-modal").classList.remove("open");
+document.getElementById("retro-dt-submit-btn").onclick = async () => {
+  const start = document.getElementById("retro-dt-start").value;
+  const end = document.getElementById("retro-dt-end").value;
+  if (!start || !end) { toast("Enter both downtime times", "err"); return; }
+  const startTs = new Date(start);
+  const endTs = new Date(end);
+  if (endTs <= startTs) { toast("End time must be after start time", "err"); return; }
+
+  const btn = document.getElementById("retro-dt-submit-btn");
+  btn.disabled = true; btn.textContent = "Saving...";
+  const { error } = await sb.rpc("log_downtime", {
+    p_line_id: state.currentLine,
+    p_start_ts: startTs.toISOString(),
+    p_end_ts: endTs.toISOString(),
+    p_type: document.getElementById("retro-dt-type").value,
+    p_reason_code_id: document.getElementById("retro-dt-reason").value,
+    p_reason_text: document.getElementById("retro-dt-reason-text").value.trim() || null,
+  });
+  btn.disabled = false; btn.textContent = "Add Downtime";
+  if (error) { toast("Failed: " + error.message, "err"); return; }
+  toast("Retro downtime added");
+  document.getElementById("retro-downtime-modal").classList.remove("open");
+  document.getElementById("retro-dt-reason-text").value = "";
   await refreshEntryView();
 };
 document.getElementById("shift-log-table").addEventListener("click", async (e) => {
