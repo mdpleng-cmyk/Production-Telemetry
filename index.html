@@ -177,8 +177,6 @@
       <div id="hourly-breakdown" style="margin-top:10px;"></div>
     </div>
 
-    <button id="new-shift-btn" style="width:100%; margin-bottom:16px;">Manually Start New Shift</button>
-
     <div class="section-label">Shift Log</div>
     <div id="shift-log-table"></div>
   </main>
@@ -463,7 +461,7 @@ async function showMainApp() {
       document.getElementById("bd-datetime").value = datetimeLocalValue(new Date());
       document.getElementById("backdate-modal").classList.add("open");
     };
-    document.getElementById("new-shift-btn").after(bdBtn);
+    document.getElementById("hourly-breakdown").closest(".panel").after(bdBtn);
     const retroBtn = document.createElement("button");
     retroBtn.textContent = "Add Retro Downtime";
     retroBtn.style.cssText = "width:100%; margin-bottom:16px;";
@@ -475,7 +473,7 @@ async function showMainApp() {
       document.getElementById("retro-dt-end").value = datetimeLocalValue(end);
       document.getElementById("retro-downtime-modal").classList.add("open");
     };
-    document.getElementById("new-shift-btn").after(retroBtn);
+    bdBtn.after(retroBtn);
   }
 
   await Promise.all([loadLines(), loadProducts(), loadReasonCodes()]);
@@ -554,14 +552,6 @@ document.getElementById("set-product-btn").onclick = async () => {
   if (error) { toast("Failed: " + error.message, "err"); return; }
   toast("Product updated");
   document.getElementById("product-picker").classList.add("hidden");
-  await refreshEntryView();
-};
-
-document.getElementById("new-shift-btn").onclick = async () => {
-  if (!confirm("Manually close the current shift and start a new one now?")) return;
-  const { error } = await sb.rpc("manual_start_new_shift", { p_line_id: state.currentLine });
-  if (error) { toast("Failed: " + error.message, "err"); return; }
-  toast("New shift started");
   await refreshEntryView();
 };
 
