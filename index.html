@@ -238,10 +238,10 @@
   <div class="modal-box">
     <div class="eyebrow">Possible Downtime Detected</div>
     <p id="downtime-msg" class="readout-empty" style="margin:8px 0 12px; font-size:13px;"></p>
-    <label>Type</label>
-    <select id="dt-type" style="width:100%; margin-bottom:10px;"><option>Unplanned</option><option>Planned</option></select>
     <label>Reason</label>
     <select id="dt-reason" style="width:100%; margin-bottom:10px;"></select>
+    <label>Type</label>
+    <select id="dt-type" style="width:100%; margin-bottom:10px;"><option>Unplanned</option><option>Planned</option></select>
     <input id="dt-reason-text" type="text" placeholder="Additional detail (optional)" style="width:100%; margin-bottom:12px; font-family:'Inter',sans-serif;" />
     <div style="display:flex; gap:8px;">
       <button id="dt-log-btn" class="primary" style="flex:1;">Log Downtime</button>
@@ -283,10 +283,10 @@
     <input id="retro-dt-start" type="datetime-local" style="width:100%;margin-bottom:10px;" />
     <label>Ended</label>
     <input id="retro-dt-end" type="datetime-local" style="width:100%;margin-bottom:10px;" />
-    <label>Type</label>
-    <select id="retro-dt-type" style="width:100%; margin-bottom:10px;"><option>Unplanned</option><option>Planned</option></select>
     <label>Reason</label>
     <select id="retro-dt-reason" style="width:100%; margin-bottom:10px;"></select>
+    <label>Type</label>
+    <select id="retro-dt-type" style="width:100%; margin-bottom:10px;"><option>Unplanned</option><option>Planned</option></select>
     <input id="retro-dt-reason-text" type="text" placeholder="Additional detail (optional)" style="width:100%;margin-bottom:12px;font-family:'Inter',sans-serif;" />
     <div style="display:flex;gap:8px;">
       <button id="retro-dt-submit-btn" class="primary" style="flex:1;">Add Downtime</button>
@@ -468,8 +468,10 @@ async function showMainApp() {
     retroBtn.textContent = "Add Retro Downtime";
     retroBtn.style.cssText = "width:100%; margin-bottom:16px;";
     retroBtn.onclick = () => {
-      const end = new Date();
-      document.getElementById("retro-dt-start").value = datetimeLocalValue(new Date(end.getTime() - 60 * 60000));
+      const start = new Date();
+      start.setSeconds(0, 0);
+      const end = new Date(start.getTime() + 60 * 60000);
+      document.getElementById("retro-dt-start").value = datetimeLocalValue(start);
       document.getElementById("retro-dt-end").value = datetimeLocalValue(end);
       document.getElementById("retro-downtime-modal").classList.add("open");
     };
@@ -887,10 +889,7 @@ function buildBpmTrendSvg(scaleStart, scaleEnd, rawEvents, rated) {
     }
 
     const window = validEvents.slice(start, index + 1);
-    const totalDuration = window.reduce((sum, item, itemIndex) => {
-      if (itemIndex === 0) return sum;
-      return sum + item.activeMs;
-    }, 0);
+    const totalDuration = window.reduce((sum, item) => sum + item.activeMs, 0);
     const weightedBpm = window.reduce((sum, item, itemIndex) => {
       const duration = item.activeMs;
       return sum + item.bpm * duration;
