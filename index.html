@@ -631,10 +631,16 @@ async function refreshEntryView() {
     const enriched = enrichEvents(rawEvents || []);
     const events = enriched.filter(e => new Date(e.event_ts) >= shiftStart);
     const { data: downtime } = await sb.from("downtime_log").select("*").eq("line_id", state.currentLine)
-      .gte("start_ts", shiftStart.toISOString());
+      .lt("start_ts", new Date().toISOString())
+      .or(`end_ts.is.null,end_ts.gte.${shiftStart.toISOString()}`);
+    const shiftDowntime = (downtime || []).filter(d => {
+      const dStart = new Date(d.start_ts).getTime();
+      const dEnd = d.end_ts ? new Date(d.end_ts).getTime() : Date.now();
+      return dEnd > shiftStart.getTime() && dStart < Date.now();
+    });
 
-    renderSummary(summaryEl, openShift, openRun, product, events, downtime || []);
-    renderShiftLogTable(events, downtime || []);
+    renderSummary(summaryEl, openShift, openRun, product, events, shiftDowntime);
+    renderShiftLogTable(events, shiftDowntime);
   }
 
   await refreshTodayTotal();
@@ -1130,8 +1136,10 @@ function renderSummary(el, shift, run, product, events, downtime) {
   const totalOutput = events.reduce((s, e) => s + (typeof e.interval_output === "number" ? e.interval_output : 0), 0);
 
   let downtimeMin = 0, plannedMin = 0, unplannedMin = 0;
-  downtime.filter(d => d.end_ts).forEach(d => {
-    const min = (new Date(d.end_ts) - new Date(d.start_ts)) / 60000;
+  downtime.forEach(d => {
+    const overlapStart = Math.max(start.getTime(), new Date(d.start_ts).getTime());
+    const overlapEnd = Math.min(new Date(latest.event_ts).getTime(), d.end_ts ? new Date(d.end_ts).getTime() : now.getTime());
+    const min = Math.max(0, (overlapEnd - overlapStart) / 60000);
     downtimeMin += min;
     if (d.type === "Planned") plannedMin += min; else unplannedMin += min;
   });
@@ -1145,7 +1153,7 @@ function renderSummary(el, shift, run, product, events, downtime) {
   html += `<div class="hero-block" style="margin-top:8px;"><div class="hero-label">Output (this shift)</div><span class="hero-number">${totalOutput.toLocaleString()}</span><span class="hero-unit">bottles</span></div>`;
 
   if (rated && shiftAvg !== null) {
-    const pct = Math.round((shiftAvg / rated) * 100);
+    const pct = Math.min(100, Math.max(0, Math.round((shiftAvg / rated) * 100)));
     html += `<div class="perf-block"><div class="hero-label">Performance (Availability × Speed)*</div><div class="perf-pct">${pct}%</div>
       <div class="progress-track"><div class="progress-fill" style="width:${Math.min(100, Math.max(0, pct))}%;"></div></div>
       <div class="readout-empty" style="margin-top:6px;">Actual: ${Math.round(shiftAvg)} BPM · Rated: ${Math.round(rated)} BPM<br>* Availability × Performance, not full OEE.</div></div>`;
