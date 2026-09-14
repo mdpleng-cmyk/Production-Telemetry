@@ -22,7 +22,7 @@
   h1 span { color: var(--amber); }
   header.appbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--border); background: var(--panel); }
   .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--green); margin-right: 6px; box-shadow: 0 0 6px var(--green); }
-  select, input[type=number], input[type=date], input[type=text] { background: var(--panel); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius); padding: 9px 10px; font-family: 'JetBrains Mono', monospace; font-size: 14px; }
+  select, input[type=number], input[type=date], input[type=text], input[type=datetime-local] { background: var(--panel); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius); padding: 9px 10px; font-family: 'JetBrains Mono', monospace; font-size: 14px; }
   input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
   button { font-family: 'Oswald', sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; padding: 10px 16px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--panel-raised); color: var(--text); cursor: pointer; }
   button:active { transform: translateY(1px); }
@@ -68,6 +68,8 @@
   .hidden { display: none !important; }
   .timeline-track { position: relative; height: 12px; background: var(--green); border-radius: 4px; overflow: hidden; margin: 10px 0 6px; }
   .timeline-segment { position: absolute; top: 0; height: 100%; }
+  .timeline-boundary { position: absolute; top: 0; bottom: 0; width: 2px; background: rgba(255,255,255,0.4); box-shadow: 0 0 0 1px rgba(0,0,0,0.2); }
+  .timeline-boundary::after { content: ""; position: absolute; left: 50%; transform: translateX(-50%); top: -6px; width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,0.7); }
   .timeline-segment.unplanned { background: var(--red); }
   .timeline-segment.planned { background: var(--amber); }
   .timeline-segment.cip { background: #4DA3FF; }
@@ -161,13 +163,8 @@
       <button id="submit-reading-btn" class="primary big" style="margin-top:12px;">Add Reading</button>
     </div>
 
-    <!-- Today's total, across all shifts. -->
-    <div id="today-total-panel" class="panel">
-      <div class="hero-block" style="margin-bottom:0;">
-        <div class="hero-label">Today's Total (since 6:00 AM)</div>
-        <span class="hero-number" id="today-total-value" style="font-size:32px;">—</span><span class="hero-unit">bottles</span>
-      </div>
-    </div>
+    <div class="section-label">This Shift</div>
+    <div id="summary-panel" class="panel"><div class="eyebrow">Loading summary&hellip;</div></div>
 
     <!-- Today's overview — when CIP/changeover/downtime happened across the day. -->
     <div class="panel">
@@ -179,9 +176,6 @@
       <span class="eyebrow">Hourly Breakdown</span>
       <div id="hourly-breakdown" style="margin-top:10px;"></div>
     </div>
-
-    <div class="section-label">This Shift</div>
-    <div id="summary-panel" class="panel"><div class="eyebrow">Loading summary&hellip;</div></div>
 
     <button id="new-shift-btn" style="width:100%; margin-bottom:16px;">Manually Start New Shift</button>
 
@@ -235,7 +229,7 @@
     <div class="eyebrow">Counter Reset Detected</div>
     <p class="readout-empty" style="margin:8px 0 12px; font-size:12px;">This reading is lower than the last one recorded on this line — likely a meter reset or replacement. Confirm or adjust when it actually happened.</p>
     <label>Reset happened at</label>
-    <input id="reset-checkpoint-time" type="text" placeholder="YYYY-MM-DDTHH:MM" />
+    <input id="reset-checkpoint-time" type="datetime-local" />
     <button id="confirm-reset-btn" class="primary big">Confirm &amp; Log Reading</button>
   </div>
 </div>
@@ -271,7 +265,7 @@
   <div class="modal-box">
     <div class="eyebrow">Add Backdated Reading</div>
     <label>When</label>
-    <input id="bd-datetime" type="text" placeholder="YYYY-MM-DDTHH:MM" style="width:100%;margin-bottom:10px;" />
+    <input id="bd-datetime" type="datetime-local" style="width:100%;margin-bottom:10px;" />
     <label>Counter</label>
     <input id="bd-counter" type="number" step="any" style="width:100%;margin-bottom:10px;" />
     <input id="bd-notes" type="text" placeholder="Notes (optional)" style="width:100%;margin-bottom:12px;font-family:'Inter',sans-serif;" />
@@ -292,6 +286,7 @@ const SUPABASE_URL = "https://xjekepsytxythsqutafa.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhqZWtlcHN5dHh5dGhzcXV0YWZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxOTU1MzQsImV4cCI6MjEwMjc3MTUzNH0.D3X9qzNBR1TdQRDJXuFxa7AK88S0UVIp7x-8oZ7O0vg";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const SHIFT_BLOCK_HOURS = [6, 14, 22];
+const BPM_TREND_WINDOW_MIN = 30;
 
 // ============================================================
 // STATE
@@ -305,6 +300,7 @@ const state = {
   pendingResetCounter: null, pendingResetNotes: null,
   dashboardChannel: null,
   entryChannel: null,
+  currentTrendDowntime: [],
 };
 
 function toast(msg, kind = "ok") {
@@ -700,21 +696,45 @@ function downtimeColorClass(reasonLabel, type) {
 async function refreshTodayOverview() {
   const dayStart = operationalDayStart(new Date());
   const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60000);
+  const lookbackStart = new Date(dayStart.getTime() - 24 * 60 * 60000);
   const now = new Date();
 
   const { data: downtime } = await sb.from("downtime_log").select("*").eq("line_id", state.currentLine)
     .gte("start_ts", dayStart.toISOString()).lte("start_ts", dayEnd.toISOString());
+  const { data: rawEvents } = await sb.from("events").select("*").eq("line_id", state.currentLine)
+    .gte("event_ts", lookbackStart.toISOString()).order("event_ts", { ascending: true });
   const { data: lastEvent } = await sb.from("events").select("event_ts").eq("line_id", state.currentLine)
     .order("event_ts", { ascending: false }).limit(1).maybeSingle();
+  const { data: currentRun } = await sb.from("runs").select("sku_id").eq("line_id", state.currentLine)
+    .order("started_at", { ascending: false }).limit(1).maybeSingle();
+
+  const product = currentRun ? state.products.find(p => p.sku_id === currentRun.sku_id) : null;
+  const rated = product?.rated_speed_bpm ?? null;
+  state.currentTrendDowntime = downtime || [];
 
   const latestTs = lastEvent ? new Date(lastEvent.event_ts) : dayStart;
   const el = document.getElementById("today-overview");
-  el.innerHTML = buildTimelineBar(dayStart, dayEnd, downtime || [], latestTs, now);
+  el.innerHTML = buildTimelineBar(dayStart, dayEnd, downtime || [], latestTs, now) + buildBpmTrendSvg(dayStart, dayEnd, rawEvents || [], rated);
 }
 
 function buildTimelineBar(scaleStart, scaleEnd, downtimeRows, latestTs, now) {
   const totalMs = scaleEnd.getTime() - scaleStart.getTime();
   if (totalMs <= 0) return "";
+
+  const shiftBoundaryTimes = [];
+  for (const hour of [6, 14, 22]) {
+    const cursor = new Date(scaleStart);
+    cursor.setHours(hour, 0, 0, 0);
+    if (cursor.getTime() < scaleStart.getTime()) cursor.setDate(cursor.getDate() + 1);
+    if (cursor.getTime() >= scaleStart.getTime() && cursor.getTime() <= scaleEnd.getTime()) {
+      shiftBoundaryTimes.push(cursor.getTime());
+    }
+  }
+
+  const boundaryMarkup = shiftBoundaryTimes.map(ts => {
+    const leftPct = ((ts - scaleStart.getTime()) / totalMs) * 100;
+    return `<div class="timeline-boundary" style="left:${leftPct}%;"></div>`;
+  }).join("");
 
   let segments = "";
   const seenClasses = {};
@@ -747,7 +767,7 @@ function buildTimelineBar(scaleStart, scaleEnd, downtimeRows, latestTs, now) {
     segments += `<div class="timeline-segment stale" style="left:${Math.max(0, leftPct)}%;width:${widthPct}%;"></div>`;
   }
 
-  let html = `<div class="timeline-track">${segments}</div>`;
+  let html = `<div class="timeline-track">${boundaryMarkup}${segments}</div>`;
   const labels = {
     cip: ["CIP", "#4DA3FF"], changeover: ["Changeover", "#B388FF"], labelchange: ["Label Change", "#FF6FA5"],
     planned: ["Planned", "var(--amber)"], unplanned: ["Unplanned", "var(--red)"],
@@ -763,6 +783,123 @@ function buildTimelineBar(scaleStart, scaleEnd, downtimeRows, latestTs, now) {
   } else {
     html += '<div class="readout-empty" style="margin-top:4px;">No downtime logged yet today.</div>';
   }
+  return html;
+}
+
+function buildBpmTrendSvg(scaleStart, scaleEnd, rawEvents, rated) {
+  const downtimeRanges = (state.currentTrendDowntime || [])
+    .map(d => {
+      if (!d.start_ts || !d.end_ts) return null;
+      const start = new Date(d.start_ts).getTime();
+      const end = new Date(d.end_ts).getTime();
+      if (!(end > start)) return null;
+      return { start, end };
+    })
+    .filter(Boolean);
+
+  const enriched = enrichEvents(rawEvents || []);
+  const dayEvents = enriched.filter(e => {
+    const ts = new Date(e.event_ts).getTime();
+    return ts >= scaleStart.getTime() && ts <= scaleEnd.getTime();
+  });
+
+  if (dayEvents.length === 0) {
+    return '<div class="readout-empty" style="margin-top:8px;">No BPM trend yet today.</div>';
+  }
+
+  const windowMs = BPM_TREND_WINDOW_MIN * 60 * 1000;
+  const rolling = [];
+  const points = [];
+
+  dayEvents.forEach(e => {
+    const ts = new Date(e.event_ts).getTime();
+    const bpm = typeof e.avg_bpm === "number" ? e.avg_bpm : null;
+    if (bpm === null) return;
+
+    while (rolling.length > 0 && ts - rolling[0].ts > windowMs) rolling.shift();
+    rolling.push({ ts, bpm });
+    const avg = rolling.reduce((sum, item) => sum + item.bpm, 0) / rolling.length;
+    points.push({ ts, bpm: avg });
+  });
+
+  if (points.length === 0) {
+    return '<div class="readout-empty" style="margin-top:8px;">No BPM trend yet today.</div>';
+  }
+
+  const totalMs = Math.max(1, scaleEnd.getTime() - scaleStart.getTime());
+  const paddingX = 22;
+  const plotTop = 22;
+  const plotBottom = 88;
+  const innerW = 1000 - paddingX * 2;
+  const innerH = plotBottom - plotTop;
+  const values = points.map(p => p.bpm).filter(Number.isFinite);
+  const observedMax = values.length ? Math.max(...values) : 0;
+  const ratedMax = typeof rated === "number" && rated > 0 ? rated : 0;
+  const maxBpm = Math.max(60, ratedMax * 1.25, observedMax * 1.1);
+  const minBpm = 0;
+
+  const mapX = ts => paddingX + ((ts - scaleStart.getTime()) / totalMs) * innerW;
+  const mapY = bpm => {
+    const bounded = Math.max(minBpm, Math.min(maxBpm, bpm));
+    return plotBottom - ((bounded - minBpm) / maxBpm) * innerH;
+  };
+
+  const segments = [];
+  let current = [];
+  points.forEach((point, index) => {
+    if (index > 0) {
+      const prev = points[index - 1];
+      const prevTs = prev.ts;
+      const currTs = point.ts;
+      const crossesDowntime = downtimeRanges.some(range => Math.max(prevTs, currTs) > range.start && Math.min(prevTs, currTs) < range.end);
+      if (crossesDowntime) {
+        if (current.length > 1) segments.push(current);
+        current = [];
+      }
+    }
+    current.push(point);
+  });
+  if (current.length > 1) segments.push(current);
+
+  const tickHours = [6, 14, 22];
+  const tickTimes = tickHours.map(hour => {
+    const tick = new Date(scaleStart);
+    tick.setHours(hour, 0, 0, 0);
+    if (tick.getTime() < scaleStart.getTime()) tick.setDate(tick.getDate() + 1);
+    if (tick.getTime() > scaleEnd.getTime()) return null;
+    return tick.getTime();
+  }).filter(Boolean);
+
+  const shiftMarkers = tickTimes.map(ts => {
+    const x = mapX(ts);
+    return `<line x1="${x}" y1="18" x2="${x}" y2="88" stroke="rgba(255,255,255,0.28)" stroke-width="1.2" stroke-dasharray="4 4" />
+      <text x="${x}" y="14" text-anchor="middle" font-size="9" fill="var(--text-muted)" style="letter-spacing:0.08em;">SHIFT</text>`;
+  }).join("");
+
+  let html = `<svg viewBox="0 0 1000 120" preserveAspectRatio="none" style="display:block;width:100%;height:120px;">
+    <defs><clipPath id="bpm-trend-plot-clip"><rect x="${paddingX}" y="${plotTop}" width="${innerW}" height="${innerH}" /></clipPath></defs>`;
+  if (typeof rated === "number" && rated > 0) {
+    const y = mapY(rated);
+    html += `<line x1="${paddingX}" y1="${y}" x2="${1000 - paddingX}" y2="${y}" stroke="var(--text-muted)" stroke-width="1.5" stroke-dasharray="6 6" clip-path="url(#bpm-trend-plot-clip)" />`;
+  }
+
+  html += shiftMarkers;
+
+  html += `<g clip-path="url(#bpm-trend-plot-clip)">`;
+  segments.forEach(segment => {
+    if (segment.length < 2) return;
+    const poly = segment.map(p => `${mapX(p.ts)},${mapY(p.bpm)}`).join(" ");
+    html += `<polyline fill="none" stroke="var(--amber)" stroke-width="2.25" points="${poly}" />`;
+  });
+  html += `</g>`;
+
+  tickTimes.forEach(ts => {
+    const x = mapX(ts);
+    html += `<line x1="${x}" y1="88" x2="${x}" y2="92" stroke="var(--text-muted)" stroke-width="1" opacity="0.7" />`;
+    html += `<text x="${x}" y="108" text-anchor="middle" font-size="10" fill="var(--text-muted)">${fmtTime(ts)}</text>`;
+  });
+
+  html += `</svg>`;
   return html;
 }
 
@@ -804,7 +941,7 @@ function buildHourlyOutput(rawEvents, dayStart, dayEnd) {
 }
 
 async function refreshHourlyBreakdown() {
-  const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
+  const dayStart = operationalDayStart(new Date());
   const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60000);
   const lookbackStart = new Date(dayStart.getTime() - 24 * 60 * 60000);
   const now = new Date();
@@ -814,16 +951,16 @@ async function refreshHourlyBreakdown() {
     .order("event_ts", { ascending: true });
 
   const { data: downtime } = await sb.from("downtime_log").select("*").eq("line_id", state.currentLine)
-    .lt("start_ts", new Date(dayStart.getTime() + 24 * 60 * 60000).toISOString())
+    .lt("start_ts", dayEnd.toISOString())
     .or(`end_ts.is.null,end_ts.gte.${dayStart.toISOString()}`);
 
   const { hourOutput, hourHasData } = buildHourlyOutput(events || [], dayStart, dayEnd);
 
   const rows = [];
   for (let h = 0; h < 24; h++) {
-    const hs = new Date(dayStart.getTime() + h * 60 * 60000);
+    const hs = new Date(dayStart.getTime() + h * 3600000);
     if (hs > now) break; // don't render hours that haven't started yet
-    const he = new Date(hs.getTime() + 60 * 60000);
+    const he = new Date(hs.getTime() + 3600000);
 
     const output = hourHasData[h] ? Math.round(hourOutput[h]) : null;
 
@@ -855,8 +992,11 @@ async function refreshHourlyBreakdown() {
 function renderSummary(el, shift, run, product, events, downtime) {
   const start = new Date(shift.started_at);
   const now = new Date();
+  let html = '<div style="font-size:11px; color:var(--text-muted); margin-bottom:8px; display:flex; align-items:baseline; gap:6px;">\n  <span>Today\'s Total:</span>\n  <span id="today-total-value" style="font-family:\'JetBrains Mono\',monospace; font-size:18px; font-weight:700; color:var(--amber);">—</span>\n  <span>bottles</span>\n</div>';
+
   if (events.length === 0) {
-    el.innerHTML = `<div class="eyebrow">Since ${fmtTime(start)}</div><div class="readout-empty" style="margin-top:8px;">No readings logged yet this shift.</div>`;
+    html += `<div class="eyebrow">Since ${fmtTime(start)}</div><div class="readout-empty" style="margin-top:8px;">No readings logged yet this shift.</div>`;
+    el.innerHTML = html;
     return;
   }
   const latest = events[events.length - 1];
@@ -874,7 +1014,7 @@ function renderSummary(el, shift, run, product, events, downtime) {
   const speedBaseMin = runTimeMin + unplannedMin;
   const shiftAvg = (speedBaseMin > 0) ? totalOutput / speedBaseMin : null;
 
-  let html = `<div class="eyebrow">Since ${fmtTime(start)}</div>`;
+  html += `<div class="eyebrow">Since ${fmtTime(start)}</div>`;
   html += `<div class="hero-block" style="margin-top:8px;"><div class="hero-label">Output (this shift)</div><span class="hero-number">${totalOutput.toLocaleString()}</span><span class="hero-unit">bottles</span></div>`;
 
   if (rated && shiftAvg !== null) {
