@@ -618,8 +618,8 @@ async function refreshEntryView() {
     const lookbackStart = new Date(shiftStart.getTime() - 24 * 60 * 60000);
     const { data: rawEvents } = await sb.from("events").select("*").eq("line_id", state.currentLine)
       .gte("event_ts", lookbackStart.toISOString()).order("event_ts", { ascending: true });
-    const enriched = enrichEvents(rawEvents || []);
-    const events = enriched.filter(e => new Date(e.event_ts) >= shiftStart);
+    const shiftEvents = (rawEvents || []).filter(e => new Date(e.event_ts) >= shiftStart);
+    const events = enrichEvents(shiftEvents);
     const { data: downtime } = await sb.from("downtime_log").select("*").eq("line_id", state.currentLine)
       .lt("start_ts", new Date().toISOString())
       .or(`end_ts.is.null,end_ts.gte.${shiftStart.toISOString()}`);
